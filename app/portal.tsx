@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "progress" | "demo" | "team" | "admin" | "settings";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "settings";
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
   { id: "onboarding", icon: "✦", label: "Agent Canvas" },
   { id: "learn", icon: "▤", label: "Learning Center" },
+  { id: "clawmaxTutorial", icon: "C", label: "ClawMax Tutorial" },
+  { id: "cogneeTutorial", icon: "◎", label: "Cognee Tutorial" },
   { id: "progress", icon: "◎", label: "Build Progress" },
   { id: "demo", icon: "▶", label: "Demo & Evaluation" },
 ];
@@ -86,7 +88,7 @@ export function HackathonPortal() {
         <nav aria-label="Main navigation">
           <p className="nav-label">YOUR HACKATHON</p>
           {nav.map((item) => (
-            <button key={item.id} className={view === item.id ? "nav-item active" : "nav-item"} onClick={() => setView(item.id)}>
+            <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}${item.id === "clawmaxTutorial" || item.id === "cogneeTutorial" ? " tutorial-nav-item" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
               {item.id === "progress" && <span className="nav-badge">{done.length}/{milestones.length}</span>}
             </button>
@@ -114,6 +116,8 @@ export function HackathonPortal() {
             <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
           )}
           {view === "learn" && <LearningCenter setAssistant={setAssistant} />}
+          {view === "clawmaxTutorial" && <ClawMaxTutorial />}
+          {view === "cogneeTutorial" && <CogneeTutorial setAssistant={setAssistant} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
@@ -199,6 +203,29 @@ function LearningCenter({ setAssistant }: { setAssistant: (v: boolean) => void }
     <div className="page-intro"><div><span className="eyebrow">TASK-BASED · OFFICIAL SOURCES</span><h2>Learn only what you need to build.</h2><p>Short, practical lessons connected to your milestones. Select any text on this page to ask the AI assistant.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
     <div className="learning-layout"><section className="lesson-list">{lessons.map((lesson, i) => <article className="lesson" key={lesson.n}><span className={`lesson-number ${lesson.color}`}>{lesson.n}</span><div><small>{lesson.meta}</small><h3>{lesson.title}</h3><div className="lesson-bar"><i style={{ width: i === 0 ? "100%" : i === 1 ? "54%" : "0%" }} /></div></div><button disabled={lesson.status === "Locked"}>{lesson.status} {lesson.status !== "Locked" && "→"}</button></article>)}</section>
     <aside className="memory-loop"><span>COGNEE MEMORY LOOP</span><h3>One loop. Five moves.</h3>{["Add / Remember data", "Cognify / Build memory", "Search / Recall", "Collect feedback", "Improve the agent"].map((item, i) => <div key={item}><b>{i + 1}</b><span>{item}</span>{i < 4 && <i>↓</i>}</div>)}<a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">Open official Cognee docs ↗</a></aside></div>
+  </>;
+}
+
+function ClawMaxTutorial() {
+  return <div className="waiting-page"><div className="waiting-mark">C</div><span className="eyebrow">CLAWMAX TUTORIAL</span><h2>Waiting for Max.</h2><p>This page is reserved for the official ClawMax tutorial. Product steps, screenshots, terminology, and integration instructions will be added after Max provides or verifies the source materials.</p><div className="waiting-status"><span>CONTENT STATUS</span><b>Official materials pending</b></div></div>;
+}
+
+function CogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { n: "01", action: "ADD", title: "Give Cognee something to remember", detail: "Add one short, trusted source to a project dataset. In the real hackathon this can be text, a document, or another supported source.", code: `await cognee.add(\n  "Team preferences: concise plans, no meeting conflicts.",\n  dataset_name="team_synapse"\n)` },
+    { n: "02", action: "COGNIFY", title: "Build structured memory", detail: "Cognify processes the added source into searchable entities, relationships, chunks, and embeddings. The real page will show pipeline status and errors.", code: `await cognee.cognify(\n  datasets=["team_synapse"]\n)` },
+    { n: "03", action: "SEARCH", title: "Recall the right context", detail: "Ask a question whose answer exists in the saved source. A successful result should include an answer and enough source context to verify it.", code: `results = await cognee.search(\n  "How does the team prefer plans?",\n  datasets=["team_synapse"]\n)` },
+    { n: "04", action: "FEEDBACK", title: "Record whether recall helped", detail: "The participant marks the result helpful or not helpful and records what was missing. This becomes evidence for improving the agent and tutorial.", code: `feedback = {\n  "helpful": true,\n  "note": "Found the correct preference"\n}` },
+    { n: "05", action: "IMPROVE", title: "Use feedback in the next run", detail: "Update the source, retrieval settings, or agent workflow, then repeat the same evaluation question and compare the result.", code: `# Repeat the same test\n# Compare before vs. after\n# Save the improvement evidence` },
+  ];
+  const current = steps[step];
+  return <>
+    <div className="demo-notice"><span>DEMO TUTORIAL</span><div><strong>This walkthrough demonstrates the intended participant experience.</strong><p>Buttons and results are illustrative. The real version will call the configured Cognee service, use authenticated team datasets, and record progress events.</p></div></div>
+    <div className="cognee-head"><div><span className="eyebrow">COGNEE MEMORY LOOP</span><h2>Remember. Connect. Recall. Improve.</h2><p>Complete one small memory loop before adding more data or building multiple agents.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this tutorial</button></div>
+    <div className="cognee-tutorial-layout"><nav className="tutorial-step-nav" aria-label="Cognee tutorial steps">{steps.map((item, index) => <button key={item.n} className={step === index ? "active" : ""} onClick={() => setStep(index)}><b>{item.n}</b><span><small>{item.action}</small>{item.title}</span>{index < step && <i>✓</i>}</button>)}</nav>
+    <section className="tutorial-workspace"><div className="workspace-meta"><span>STEP {current.n} OF 05</span><b>~5 MIN</b></div><span className="action-chip">{current.action}</span><h2>{current.title}</h2><p>{current.detail}</p><div className="code-demo"><header><span>PYTHON · DEMO</span><button>Copy</button></header><pre>{current.code}</pre></div><div className="demo-result"><span>EXPECTED REAL-HACKATHON EVIDENCE</span><p>{step === 0 && "A memory record with dataset, owner, source, and sharing scope."}{step === 1 && "A completed pipeline run with processing duration and any error details."}{step === 2 && "A retrieved answer with source context and a repeatable test question."}{step === 3 && "Helpful/not-helpful feedback linked to the exact search result."}{step === 4 && "Before/after results showing whether the same evaluation improved."}</p></div><footer><button className="outline-button" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}>← Previous</button><button className="primary" disabled={step === steps.length - 1} onClick={() => setStep((value) => Math.min(steps.length - 1, value + 1))}>Next step →</button></footer></section>
+    <aside className="tutorial-reality"><span>HOW THIS BECOMES REAL</span><h3>Demo now. Connected workflow later.</h3>{["Participant signs in and selects a Team/Project dataset.", "AgentForge calls Cognee through the backend—never directly with a secret in the browser.", "Pipeline events automatically verify tutorial and milestone progress.", "Every answer shows its memory source and sharing scope.", "Feedback and repeated tests become improvement evidence."].map((item, i) => <div key={item}><b>{i + 1}</b><p>{item}</p></div>)}<a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">Open official Cognee docs ↗</a></aside></div>
   </>;
 }
 
