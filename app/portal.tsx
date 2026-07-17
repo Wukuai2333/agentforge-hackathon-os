@@ -42,6 +42,7 @@ export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
   const [done, setDone] = useState<number[]>([0, 1, 2]);
   const [assistant, setAssistant] = useState(false);
+  const [assistantContext, setAssistantContext] = useState("");
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
   const [surveyAnswers, setSurveyAnswers] = useState<string[]>([]);
@@ -73,7 +74,7 @@ export function HackathonPortal() {
   return (
     <div className="app-shell" onMouseUp={() => {
       const selected = typeof window !== "undefined" ? window.getSelection()?.toString().trim() : "";
-      if (selected && selected.length > 2) setAssistant(true);
+      if (selected && selected.length > 2) { setAssistantContext(selected); setAssistant(true); }
     }}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView("home")} aria-label="AgentForge home">
@@ -124,7 +125,7 @@ export function HackathonPortal() {
         </section>
       </main>
 
-      {assistant && <Assistant close={() => setAssistant(false)} />}
+      {assistant && <Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} />}
     </div>
   );
 }
@@ -324,8 +325,30 @@ function Settings({ keySaved, setKeySaved }: { keySaved: boolean; setKeySaved: (
   return <div className="settings-layout"><section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>For the prototype, credentials stay in this browser session and are never included in prompt analytics.</p><article className="setting-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax API key</h3><p>Used to guide onboarding and answer build questions.</p></div><span className={keySaved ? "pill on-track" : "pill needs-help"}>{keySaved ? "Connected" : "Not connected"}</span></div><label>API KEY<input type="password" placeholder="clawmax_••••••••••••" /></label><div className="setting-actions"><small>Stored for this session only. Never written to prompt logs.</small><button className="primary" onClick={() => setKeySaved(true)}>Test & save</button></div></article><article className="setting-card"><div className="setting-title"><span className="service-mark green">C</span><div><h3>Cognee endpoint</h3><p>Connect a team dataset through your server-side proxy.</p></div><span className="pill on-track">Connected</span></div><label>ENDPOINT<input defaultValue="https://api.cognee.ai" /></label></article></section><aside className="privacy-card"><span>WHAT WE TRACK</span><h3>Prompt analytics, with boundaries.</h3>{["Anonymized user and team IDs", "Page and tutorial step", "Prompt and assistant response", "Model, latency, tokens, and status", "Helpful / not helpful feedback"].map((item) => <p key={item}>✓ {item}</p>)}<hr />{["Passwords or API keys", "Unselected local files", "Browsing outside this app", "Sensitive data by design"].map((item) => <p className="not-tracked" key={item}>× {item}</p>)}<button className="outline-button">Read data policy</button></aside></div>;
 }
 
-function Assistant({ close }: { close: () => void }) {
+function Assistant({ close, page, selectedContext }: { close: () => void; page: string; selectedContext: string }) {
   const [text, setText] = useState("");
-  const [sent, setSent] = useState(false);
-  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>Page-aware · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>SELECTED CONTEXT</span><p>“Cognify / Build memory → Search / Recall”</p></div><div className="assistant-chat">{!sent ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page, your project stage, and the selected text. Don’t include API keys or sensitive information.</p></> : <div className="answer"><small>COGNEE · LESSON 03</small><h3>Think of Cognify as the indexing step.</h3><p>After you add data, Cognify turns it into connected, searchable memory. Your fastest success test is to add one short source, run Cognify, then ask a question whose answer exists only in that source.</p><div><button>Helpful</button><button>Not helpful</button><button>＋ Add to team brain</button></div></div>}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about the selected text…" rows={3} /><button onClick={() => { if (text.trim()) setSent(true); }}>↑</button><small>Prompts are recorded to improve this event. Never paste credentials.</small></footer></aside></div>;
+  const [answer, setAnswer] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [usage, setUsage] = useState<{ model: string; inputTokens?: number; outputTokens?: number } | null>(null);
+
+  async function ask() {
+    if (!text.trim() || loading) return;
+    setLoading(true); setError(""); setAnswer(""); setUsage(null);
+    try {
+      let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
+      if (!anonymousParticipantId) { anonymousParticipantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId); }
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text, page, selectedContext, anonymousParticipantId }) });
+      const result = await response.json() as { answer?: string; error?: string; model?: string; inputTokens?: number; outputTokens?: number };
+      if (!response.ok || !result.answer) throw new Error(result.error || "The assistant could not answer right now.");
+      setAnswer(result.answer);
+      setUsage({ model: result.model || "OpenAI", inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "The assistant could not answer right now.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Page-aware · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p></div><div className="assistant-chat">{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Using this page and your question.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={ask}>Try again</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button>Helpful</button><button>Not helpful</button><button>＋ Add to team brain</button></div></div> : <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page and the selected text. Don’t include API keys or sensitive information.</p></>}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask about this page…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Prompts and answers are recorded to improve this event. Never paste credentials.</small></footer></aside></div>;
 }
