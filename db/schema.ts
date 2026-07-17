@@ -151,3 +151,23 @@ export const tutorialVersions = sqliteTable("tutorial_versions", {
   changeSummary: text("change_summary"),
   publishedAt: integer("published_at", { mode: "timestamp" }),
 });
+
+export const sharedNotes = sqliteTable("shared_notes", {
+  id: text("id").primaryKey(),
+  teamId: text("team_id").notNull(),
+  authorId: text("author_id").notNull(),
+  authorName: text("author_name").notNull(),
+  content: text("content").notNull(),
+  sourceType: text("source_type", { enum: ["manual", "assistant"] }).notNull().default("manual"),
+  sourcePromptEventId: text("source_prompt_event_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("shared_notes_team_created_idx").on(table.teamId, table.createdAt),
+]);
+
+export const organizerSettings = sqliteTable("organizer_settings", {
+  id: text("id").primaryKey(),
+  assistantEnabled: integer("assistant_enabled", { mode: "boolean" }).notNull().default(true),
+  defaultTeamTokenQuota: integer("default_team_token_quota").notNull().default(100000),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});

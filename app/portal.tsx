@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "settings";
 
@@ -259,8 +259,14 @@ function Demo() {
   return <div className="demo-layout"><section><span className="eyebrow">FINAL STORY</span><h2>Show the change,<br />not just the agent.</h2><p>Your strongest demo compares the same task before and after feedback.</p><div className="upload-zone"><span>▶</span><h3>Drop your 60–90 second demo here</h3><p>MP4, MOV, or a shareable video link</p><button className="outline-button">Choose video</button></div></section><aside className="demo-checklist"><span>YOUR DEMO SHOULD PROVE</span>{["The real problem", "A working end-to-end task", "Before vs. after", "A repeatable success test", "What the agent learned", "How memory was used", "Data and privacy choices"].map((item, i) => <label key={item}><input type="checkbox" /> <b>{String(i + 1).padStart(2, "0")}</b><span>{item}</span></label>)}<button className="primary">Save demo draft</button></aside></div>;
 }
 
+type SharedNote = { id: string; authorName: string; content: string; sourceType: "manual" | "assistant"; createdAt: number };
+
 function TeamSpace() {
-  const [tab, setTab] = useState<"activity" | "memories" | "questions">("activity");
+  const [tab, setTab] = useState<"activity" | "notes" | "memories" | "questions">("notes");
+  const [notes, setNotes] = useState<SharedNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [notesLoading, setNotesLoading] = useState(true);
+  const [noteError, setNoteError] = useState("");
   const activity = [
     { avatar: "YR", color: "violet", person: "Yuxin", action: "saved an Agent Canvas", detail: "Personal knowledge continuity agent", meta: "2 min ago · Visible to Team Synapse", icon: "✦" },
     { avatar: "AM", color: "orange", person: "Amina", action: "shared a memory", detail: "User interview notes — planning pain points", meta: "18 min ago · Cognee / team-synapse", icon: "▤" },
@@ -279,12 +285,36 @@ function TeamSpace() {
     ["Which test cases are still failing?", "Jason", "Needs answer"],
   ];
 
+  async function loadNotes() {
+    setNotesLoading(true); setNoteError("");
+    try {
+      const response = await fetch("/api/team-notes?teamId=team-synapse-demo");
+      const result = await response.json() as { notes?: SharedNote[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "Shared notes could not be loaded.");
+      setNotes(result.notes || []);
+    } catch (error) { setNoteError(error instanceof Error ? error.message : "Shared notes could not be loaded."); }
+    finally { setNotesLoading(false); }
+  }
+
+  async function addNote() {
+    if (!noteDraft.trim()) return;
+    let authorId = sessionStorage.getItem("agentforge_participant_id");
+    if (!authorId) { authorId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", authorId); }
+    const response = await fetch("/api/team-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ teamId: "team-synapse-demo", authorId, authorName: "Yuxin Ren", content: noteDraft, sourceType: "manual" }) });
+    const result = await response.json() as { note?: SharedNote; error?: string };
+    if (!response.ok || !result.note) { setNoteError(result.error || "Note could not be added."); return; }
+    setNotes((items) => [result.note!, ...items]); setNoteDraft(""); setNoteError("");
+  }
+
+  useEffect(() => { const timer = window.setTimeout(() => void loadNotes(), 0); return () => window.clearTimeout(timer); }, []);
+
   return <>
     <div className="demo-notice"><span>DEMO VIEW</span><div><strong>This is an example of Team Space before real participant data exists.</strong><p>During the hackathon, this page will populate only when team members save canvases, share memories, ask the team brain, or complete milestones.</p></div></div>
     <div className="team-hero"><div><span className="team-logo large">S</span><div><span className="eyebrow">TEAM SYNAPSE · SHARED WORKSPACE</span><h2>Build with one shared context.</h2><p>See what teammates decided, contributed, tested, and learned—without merging everyone’s private information.</p></div></div><button className="outline-button">＋ Invite teammate</button></div>
     <div className="team-metric-grid"><article><small>TEAM MEMBERS</small><strong>3</strong><span>All active today</span></article><article><small>SHARED MEMORIES</small><strong>24</strong><span>3 added this hour</span></article><article><small>TEAM QUESTIONS</small><strong>7</strong><span>6 answered with sources</span></article><article><small>MILESTONES</small><strong>7/11</strong><span>Next: evaluation case</span></article></div>
-    <div className="team-space-grid"><section className="team-feed"><div className="team-tabs"><div>{(["activity", "memories", "questions"] as const).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div><span>Demo data</span></div>
+    <div className="team-space-grid"><section className="team-feed"><div className="team-tabs"><div>{(["activity", "notes", "memories", "questions"] as const).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div><span>{tab === "notes" ? "Live shared data" : "Demo data"}</span></div>
       {tab === "activity" && <div className="activity-list">{activity.map((item) => <article key={item.detail}><span className={`member-avatar ${item.color}`}>{item.avatar}</span><div><p><strong>{item.person}</strong> {item.action}</p><h3><span>{item.icon}</span>{item.detail}</h3><small>{item.meta}</small></div><button aria-label={`Open ${item.detail}`}>→</button></article>)}</div>}
+      {tab === "notes" && <div className="shared-notes"><div className="note-composer"><textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} rows={3} placeholder="Add a useful decision, finding, reminder, or AI answer for your team…" /><div><small>Visible to everyone in Team Synapse</small><button className="primary" onClick={() => void addNote()} disabled={!noteDraft.trim()}>＋ Add note</button></div></div>{noteError && <p className="form-error">{noteError}</p>}{notesLoading ? <p className="notes-empty">Loading shared notes…</p> : notes.length === 0 ? <p className="notes-empty">No shared notes yet. Add the first note here or save an AI answer from the Assistant.</p> : <div className="note-list">{notes.map((note) => <article key={note.id}><header><span className="member-avatar violet">{note.authorName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{note.authorName}</strong><small>{new Date(note.createdAt).toLocaleString()} · {note.sourceType === "assistant" ? "Saved from AI Assistant" : "Added by team member"}</small></div><span className={note.sourceType === "assistant" ? "note-source ai" : "note-source"}>{note.sourceType === "assistant" ? "AI NOTE" : "TEAM NOTE"}</span></header><p>{note.content}</p></article>)}</div>}</div>}
       {tab === "memories" && <div className="shared-list">{memories.map(([title, person, detail, scope]) => <article key={title}><span className="list-icon">▤</span><div><h3>{title}</h3><p>Shared by {person} · {detail}</p></div><span className={scope === "Team" ? "scope team" : "scope private"}>{scope}</span><button>Open →</button></article>)}</div>}
       {tab === "questions" && <div className="shared-list">{questions.map(([question, person, status]) => <article key={question}><span className="list-icon">?</span><div><h3>{question}</h3><p>Asked by {person}</p></div><span className="question-status">{status}</span><button>Open →</button></article>)}</div>}
     </section>
@@ -292,7 +322,73 @@ function TeamSpace() {
   </>;
 }
 
+type OrganizerData = {
+  summary: { totalPrompts: number; inputTokens: number; outputTokens: number; successRate: number; avgLatencyMs: number; lastHour: number };
+  hourly: Array<{ hour: string; prompts: number; tokens: number }>;
+  pages: Array<{ page: string; tutorialStep?: string; prompts: number; errors: number; tokens: number }>;
+  teams: Array<{ teamId: string; prompts: number; tokens: number }>;
+  prompts: Array<{ id: string; participantId: string; teamId?: string; page: string; userPrompt: string; responseText?: string; modelName?: string; latencyMs?: number; inputTokens?: number; outputTokens?: number; status: string; errorCode?: string; createdAt: number }>;
+  settings: { assistantEnabled: number; defaultTeamTokenQuota: number };
+};
+
 function Admin() {
+  const [code, setCode] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [data, setData] = useState<OrganizerData | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selectedPrompt, setSelectedPrompt] = useState<OrganizerData["prompts"][number] | null>(null);
+
+  async function loadOrganizer(candidate = accessCode) {
+    if (!candidate) return;
+    setLoading(true); setError("");
+    try {
+      const response = await fetch("/api/organizer", { headers: { "x-organizer-code": candidate } });
+      const result = await response.json() as OrganizerData & { error?: string };
+      if (!response.ok) throw new Error(result.error || "Organizer data could not be loaded.");
+      setAccessCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setData(result);
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Organizer access failed."); }
+    finally { setLoading(false); }
+  }
+
+  // Restore an organizer session once on mount; subsequent refreshes use the explicit controls.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { const saved = sessionStorage.getItem("agentforge_organizer_code"); if (!saved) return; const timer = window.setTimeout(() => { setCode(saved); void loadOrganizer(saved); }, 0); return () => window.clearTimeout(timer); }, []);
+
+  async function updateSettings(assistantEnabled: boolean, quota = data?.settings.defaultTeamTokenQuota || 100000) {
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ assistantEnabled, defaultTeamTokenQuota: quota }) });
+    if (response.ok) await loadOrganizer();
+  }
+
+  async function deletePrompt(id: string) {
+    const response = await fetch(`/api/organizer?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-organizer-code": accessCode } });
+    if (response.ok) { setSelectedPrompt(null); await loadOrganizer(); }
+  }
+
+  function exportCsv() {
+    if (!data) return;
+    const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const rows = [["time", "page", "participant", "status", "model", "input_tokens", "output_tokens", "latency_ms", "prompt"], ...data.prompts.map((item) => [new Date(item.createdAt).toISOString(), item.page, item.participantId, item.status, item.modelName, item.inputTokens, item.outputTokens, item.latencyMs, item.userPrompt])];
+    const blob = new Blob([rows.map((row) => row.map(quote).join(",")).join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "agentforge-prompt-events.csv"; link.click(); URL.revokeObjectURL(url);
+  }
+
+  if (!data) return <><div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>Open the live control room.</h2><p>Real prompts, responses, token usage, and participant identifiers are protected. Enter the Organizer Access Code stored in the local environment file.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void loadOrganizer(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer(code)} disabled={loading || !code}>{loading ? "Opening…" : "Open organizer portal"}</button></div><details className="legacy-demo"><summary>View the previous illustrative demo dashboard</summary><AdminDemo /></details></>;
+
+  const totalTokens = Number(data.summary.inputTokens) + Number(data.summary.outputTokens);
+  const quota = Number(data.settings.defaultTeamTokenQuota);
+  return <>
+    <div className="live-admin-head"><div><span className="eyebrow">LIVE ORGANIZER PORTAL</span><h2>Prompt and Token Operations</h2><p>Connected to real AgentForge prompt events. Sensitive patterns are masked before display.</p></div><div><button className="outline-button" onClick={exportCsv}>Export CSV</button><button className="outline-button" onClick={() => void loadOrganizer()}>Refresh</button></div></div>
+    <div className="metric-grid explained live-metrics"><article><small>TOTAL PROMPTS</small><strong>{data.summary.totalPrompts}</strong><span>{data.summary.lastHour} in the last hour</span><p>All recorded Assistant requests.</p></article><article><small>TOTAL TOKENS</small><strong>{totalTokens.toLocaleString()}</strong><span>{Number(data.summary.inputTokens).toLocaleString()} in · {Number(data.summary.outputTokens).toLocaleString()} out</span><p>Actual usage reported by OpenAI.</p></article><article><small>SUCCESS RATE</small><strong>{data.summary.successRate}%</strong><span>{100 - Number(data.summary.successRate)}% errors</span><p>Requests that returned a usable answer.</p></article><article><small>AVG. LATENCY</small><strong>{(Number(data.summary.avgLatencyMs) / 1000).toFixed(1)}s</strong><span>End-to-end response time</span><p>Includes OpenAI generation time.</p></article></div>
+    <section className="admin-controls"><div><span className={data.settings.assistantEnabled ? "control-dot on" : "control-dot"} /><span><small>AI ASSISTANT</small><strong>{data.settings.assistantEnabled ? "Running" : "Paused"}</strong></span><button className={data.settings.assistantEnabled ? "danger-button" : "primary"} onClick={() => void updateSettings(!data.settings.assistantEnabled)}>{data.settings.assistantEnabled ? "Pause assistant" : "Resume assistant"}</button></div><div><span><small>DEFAULT TEAM QUOTA</small><strong>{quota.toLocaleString()} tokens</strong></span><div className="quota-bar"><i style={{ width: `${Math.min(100, (totalTokens / quota) * 100)}%` }} /></div><button className="outline-button" onClick={() => { const next = window.prompt("Default tokens per team", String(quota)); if (next) void updateSettings(Boolean(data.settings.assistantEnabled), Number(next)); }}>Edit quota</button></div></section>
+    <div className="live-admin-grid"><section className="usage-panel"><div className="table-title"><div><h3>Hourly Token Trend</h3><p>Last 24 recorded hours</p></div></div><div className="usage-bars">{data.hourly.length ? data.hourly.map((item) => { const max = Math.max(...data.hourly.map((point) => Number(point.tokens)), 1); return <div key={item.hour} title={`${item.hour}: ${item.tokens} tokens`}><i style={{ height: `${Math.max(6, Number(item.tokens) / max * 100)}%` }} /><small>{item.hour.slice(11, 16)}</small></div>; }) : <p>No token data yet.</p>}</div></section><section className="usage-panel"><div className="table-title"><div><h3>Usage by Page & Step</h3><p>Where participants ask and fail</p></div></div><div className="compact-rows">{data.pages.map((item) => <div key={`${item.page}-${item.tutorialStep}`}><span><strong>{item.page}</strong><small>{item.tutorialStep || "General page"}</small></span><b>{item.prompts} prompts</b><em>{item.errors} errors</em><small>{Number(item.tokens).toLocaleString()} tokens</small></div>)}</div></section></div>
+    <section className="prompt-monitor"><div className="table-title"><div><h3>Recent Prompts</h3><p>Latest 100 · click a row to inspect the masked prompt and response</p></div><span>Protected organizer data</span></div><div className="prompt-table"><div className="prompt-row heading"><span>TIME</span><span>PAGE</span><span>PROMPT</span><span>TOKENS</span><span>STATUS</span></div>{data.prompts.map((item) => <button className="prompt-row" key={item.id} onClick={() => setSelectedPrompt(item)}><span>{new Date(item.createdAt).toLocaleTimeString()}</span><span>{item.page}</span><span>{item.userPrompt}</span><span>{Number(item.inputTokens || 0) + Number(item.outputTokens || 0)}</span><span className={`pill ${item.status === "success" ? "on-track" : "blocked"}`}>{item.status}</span></button>)}</div></section>
+    <section className="team-quota-panel"><div className="table-title"><div><h3>Team Usage & Remaining Quota</h3><p>“Unassigned” will be replaced by real team IDs after login and team membership are connected.</p></div></div>{data.teams.map((team) => <div className="team-quota-row" key={team.teamId}><strong>{team.teamId}</strong><span>{team.prompts} prompts</span><div><i style={{ width: `${Math.min(100, Number(team.tokens) / quota * 100)}%` }} /></div><b>{Number(team.tokens).toLocaleString()} used</b><em>{Math.max(0, quota - Number(team.tokens)).toLocaleString()} remaining</em></div>)}</section>
+    {selectedPrompt && <div className="milestone-backdrop" onClick={() => setSelectedPrompt(null)}><aside className="prompt-detail" onClick={(event) => event.stopPropagation()}><header><span>PROMPT DETAIL</span><button onClick={() => setSelectedPrompt(null)}>×</button></header><small>{new Date(selectedPrompt.createdAt).toLocaleString()} · {selectedPrompt.page} · {selectedPrompt.modelName}</small><h3>User prompt</h3><p>{selectedPrompt.userPrompt}</p><h3>Assistant response</h3><p>{selectedPrompt.responseText || "No response was recorded."}</p><div className="prompt-facts"><span>{selectedPrompt.inputTokens || 0} input</span><span>{selectedPrompt.outputTokens || 0} output</span><span>{selectedPrompt.latencyMs || 0} ms</span><span>{selectedPrompt.status}</span></div><button className="danger-button" onClick={() => void deletePrompt(selectedPrompt.id)}>Delete this prompt and response</button></aside></div>}
+  </>;
+}
+
+function AdminDemo() {
   const rows = [["Team Synapse", "7/11", "Cognee recall", "82%", "On track"], ["Pocket Pilot", "5/11", "First memory", "67%", "Needs help"], ["Mosaic", "8/11", "Evaluation", "91%", "On track"], ["Echo Lab", "4/11", "ClawMax setup", "58%", "Blocked"]];
   const metrics = [
     { label: "ACTIVE TEAMS", value: "24", trend: "↑ 4 in the last hour", meaning: "Teams with a participant action during the selected time window—such as opening a lesson, running an agent, saving progress, or asking AI." },
@@ -328,20 +424,27 @@ function Settings({ keySaved, setKeySaved }: { keySaved: boolean; setKeySaved: (
 function Assistant({ close, page, selectedContext }: { close: () => void; page: string; selectedContext: string }) {
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
+  const [submittedPrompt, setSubmittedPrompt] = useState("");
+  const [promptEventId, setPromptEventId] = useState("");
+  const [brainStatus, setBrainStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [usage, setUsage] = useState<{ model: string; inputTokens?: number; outputTokens?: number } | null>(null);
 
   async function ask() {
     if (!text.trim() || loading) return;
+    const promptToSend = text.trim();
+    setSubmittedPrompt(promptToSend); setText("");
     setLoading(true); setError(""); setAnswer(""); setUsage(null);
+    setPromptEventId(""); setBrainStatus("idle");
     try {
       let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
       if (!anonymousParticipantId) { anonymousParticipantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId); }
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text, page, selectedContext, anonymousParticipantId }) });
-      const result = await response.json() as { answer?: string; error?: string; model?: string; inputTokens?: number; outputTokens?: number };
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: promptToSend, page, selectedContext, anonymousParticipantId }) });
+      const result = await response.json() as { answer?: string; error?: string; model?: string; inputTokens?: number; outputTokens?: number; eventId?: string };
       if (!response.ok || !result.answer) throw new Error(result.error || "The assistant could not answer right now.");
       setAnswer(result.answer);
+      setPromptEventId(result.eventId || "");
       setUsage({ model: result.model || "OpenAI", inputTokens: result.inputTokens, outputTokens: result.outputTokens });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The assistant could not answer right now.");
@@ -350,5 +453,17 @@ function Assistant({ close, page, selectedContext }: { close: () => void; page: 
     }
   }
 
-  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Page-aware · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p></div><div className="assistant-chat">{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Using this page and your question.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={ask}>Try again</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button>Helpful</button><button>Not helpful</button><button>＋ Add to team brain</button></div></div> : <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page and the selected text. Don’t include API keys or sensitive information.</p></>}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask about this page…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Prompts and answers are recorded to improve this event. Never paste credentials.</small></footer></aside></div>;
+  async function addToTeamBrain() {
+    if (!answer || brainStatus === "saving" || brainStatus === "saved") return;
+    setBrainStatus("saving");
+    let authorId = sessionStorage.getItem("agentforge_participant_id");
+    if (!authorId) { authorId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", authorId); }
+    try {
+      const response = await fetch("/api/team-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ teamId: "team-synapse-demo", authorId, authorName: "Yuxin Ren", content: `Question: ${submittedPrompt}\n\n${answer}`, sourceType: "assistant", sourcePromptEventId: promptEventId }) });
+      if (!response.ok) throw new Error("Note could not be saved.");
+      setBrainStatus("saved");
+    } catch { setBrainStatus("error"); }
+  }
+
+  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Page-aware · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p></div><div className={`assistant-chat ${submittedPrompt ? "has-messages" : ""}`}>{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Using this page and your question.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button>Helpful</button><button>Not helpful</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to team brain" : brainStatus === "error" ? "Try adding again" : "＋ Add to team brain"}</button></div></div> : !submittedPrompt ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page and the selected text. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Prompts and answers are recorded to improve this event. Never paste credentials.</small></footer></aside></div>;
 }

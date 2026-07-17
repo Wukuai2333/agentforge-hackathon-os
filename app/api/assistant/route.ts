@@ -39,6 +39,8 @@ export async function POST(request: Request) {
 
   if (!prompt) return Response.json({ error: "Please enter a question." }, { status: 400 });
   if (!runtime.OPENAI_API_KEY) return Response.json({ error: "The organizer has not connected the OpenAI API yet." }, { status: 503 });
+  const assistantSetting = await runtime.DB.prepare("SELECT assistant_enabled AS assistantEnabled FROM organizer_settings WHERE id = 'global'").first<{ assistantEnabled: number }>();
+  if (assistantSetting?.assistantEnabled === 0) return Response.json({ error: "The organizer has temporarily paused the AI Assistant." }, { status: 503 });
 
   let status: "success" | "error" = "error";
   let answer = "";
