@@ -55,7 +55,7 @@ export async function POST(request: Request) {
         instructions: "You are the AgentForge hackathon tutor. Help participants build a useful personal agent with ClawMax and Cognee. Answer using the supplied page context. Be concise, practical, honest about uncertainty, and never request or repeat passwords or API keys. Give a concrete next step when possible.",
         input: `Current page: ${page}\nSelected context: ${selectedContext}\n\nParticipant question: ${prompt}`,
         reasoning: { effort: "low" },
-        max_output_tokens: 700,
+        max_output_tokens: 1500,
       }),
     });
     const result = await openAIResponse.json() as OpenAIResponse;
