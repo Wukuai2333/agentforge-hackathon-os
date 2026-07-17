@@ -1,10 +1,87 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const hackathonEvents = sqliteTable("hackathon_events", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  startsAt: integer("starts_at", { mode: "timestamp" }).notNull(),
+  endsAt: integer("ends_at", { mode: "timestamp" }).notNull(),
+  retentionEndsAt: integer("retention_ends_at", { mode: "timestamp" }).notNull(),
+  status: text("status", { enum: ["draft", "registration", "live", "ended", "archived"] }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const eventParticipants = sqliteTable("event_participants", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  identityProvider: text("identity_provider"),
+  identitySubject: text("identity_subject"),
+  email: text("email"),
+  displayName: text("display_name").notNull(),
+  role: text("role", { enum: ["participant", "mentor", "organizer"] }).notNull().default("participant"),
+  status: text("status", { enum: ["invited", "active", "suspended", "left"] }).notNull().default("active"),
+  consentVersion: text("consent_version").notNull(),
+  joinedAt: integer("joined_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("event_participants_identity_unique").on(table.eventId, table.identityProvider, table.identitySubject),
+  index("event_participants_event_idx").on(table.eventId),
+]);
 
 export const teams = sqliteTable("teams", {
   id: text("id").primaryKey(),
+  eventId: text("event_id").references(() => hackathonEvents.id),
+  createdByParticipantId: text("created_by_participant_id").references(() => eventParticipants.id),
   name: text("name").notNull(),
+  inviteCode: text("invite_code").unique(),
+  status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
+  dataExpiresAt: integer("data_expires_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
 });
+
+export const teamMemberships = sqliteTable("team_memberships", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  membershipRole: text("membership_role", { enum: ["creator", "member"] }).notNull().default("member"),
+  joinedAt: integer("joined_at", { mode: "timestamp" }).notNull(),
+  endedAt: integer("ended_at", { mode: "timestamp" }),
+  endReason: text("end_reason", { enum: ["left", "switched", "team_archived", "removed"] }),
+}, (table) => [
+  uniqueIndex("team_memberships_one_active_per_person")
+    .on(table.participantId)
+    .where(sql`${table.endedAt} IS NULL`),
+  index("team_memberships_team_idx").on(table.teamId),
+  index("team_memberships_event_idx").on(table.eventId),
+]);
+
+export const teamInvites = sqliteTable("team_invites", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  code: text("code").notNull().unique(),
+  createdByParticipantId: text("created_by_participant_id").notNull().references(() => eventParticipants.id),
+  maxUses: integer("max_uses"),
+  useCount: integer("use_count").notNull().default(0),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("team_invites_team_idx").on(table.teamId)]);
+
+export const teamMembershipEvents = sqliteTable("team_membership_events", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  fromTeamId: text("from_team_id").references(() => teams.id),
+  toTeamId: text("to_team_id").references(() => teams.id),
+  action: text("action", { enum: ["created", "joined", "left", "switched", "removed"] }).notNull(),
+  occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("team_membership_events_participant_idx").on(table.participantId)]);
 
 export const participants = sqliteTable("participants", {
   id: text("id").primaryKey(),

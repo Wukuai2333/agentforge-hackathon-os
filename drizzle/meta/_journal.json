@@ -15,6 +15,13 @@
       "when": 1784289141603,
       "tag": "0001_loud_richard_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784297729358,
+      "tag": "0002_motionless_mathemanic",
+      "breakpoints": true
     }
   ]
 }
