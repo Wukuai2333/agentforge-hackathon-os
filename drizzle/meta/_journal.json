@@ -8,6 +8,13 @@
       "when": 1784288304088,
       "tag": "0000_fearless_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784289141603,
+      "tag": "0001_loud_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

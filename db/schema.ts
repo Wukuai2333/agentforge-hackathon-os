@@ -25,6 +25,21 @@ export const progressEvents = sqliteTable("progress_events", {
   occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
 });
 
+export const agentProjects = sqliteTable("agent_projects", {
+  id: text("id").primaryKey(),
+  anonymousParticipantId: text("anonymous_participant_id").notNull(),
+  teamId: text("team_id"),
+  title: text("title").notNull(),
+  problem: text("problem").notNull(),
+  currentWorkflow: text("current_workflow"),
+  dataBoundaries: text("data_boundaries"),
+  successCriteria: text("success_criteria"),
+  memoryRequirements: text("memory_requirements"),
+  status: text("status", { enum: ["draft", "building", "submitted"] }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const promptEvents = sqliteTable("prompt_events", {
   id: text("id").primaryKey(),
   anonymousParticipantId: text("anonymous_participant_id").notNull(),

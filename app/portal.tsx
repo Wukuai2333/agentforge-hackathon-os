@@ -47,6 +47,8 @@ export function HackathonPortal() {
   const [answer, setAnswer] = useState("");
   const [surveyAnswers, setSurveyAnswers] = useState<string[]>([]);
   const [keySaved, setKeySaved] = useState(false);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
+  const [selectedMilestone, setSelectedMilestone] = useState<number | null>(null);
   const progress = Math.round((done.length / milestones.length) * 100);
   const surveyQuestions = [
     "What recurring problem in your life would you most like an agent to solve?",
@@ -110,10 +112,10 @@ export function HackathonPortal() {
         <section className="content">
           {view === "home" && <Overview progress={progress} setView={setView} />}
           {view === "onboarding" && (
-            <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} />
+            <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
           )}
           {view === "learn" && <LearningCenter setAssistant={setAssistant} />}
-          {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} />}
+          {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
           {view === "admin" && <Admin />}
           {view === "settings" && <Settings keySaved={keySaved} setKeySaved={setKeySaved} />}
@@ -151,8 +153,31 @@ function Overview({ progress, setView }: { progress: number; setView: (view: Vie
   </>;
 }
 
-function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers }: { surveyStep: number; questions: string[]; answer: string; setAnswer: (v: string) => void; next: () => void; answers: string[] }) {
+function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers, savedProjectId, onSaved }: { surveyStep: number; questions: string[]; answer: string; setAnswer: (v: string) => void; next: () => void; answers: string[]; savedProjectId: string | null; onSaved: (id: string) => void }) {
   const complete = surveyStep >= questions.length;
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  async function saveCanvas() {
+    if (savedProjectId || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
+      if (!anonymousParticipantId) {
+        anonymousParticipantId = crypto.randomUUID();
+        sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId);
+      }
+      const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonymousParticipantId, answers }) });
+      const result = await response.json() as { id?: string; error?: string };
+      if (!response.ok || !result.id) throw new Error(result.error || "Canvas could not be saved.");
+      onSaved(result.id);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Canvas could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
   return <div className="split-layout">
     <section className="survey-panel">
       <span className="eyebrow">AGENT-GUIDED DISCOVERY</span>
@@ -163,7 +188,7 @@ function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers }
         <h3>{questions[surveyStep]}</h3>
         <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Describe a specific moment, not a broad category…" rows={6} />
         <div className="question-footer"><small>ClawMax will use this answer to choose the next question.</small><button className="primary" onClick={next}>Continue →</button></div>
-      </div> : <div className="brief-card"><span>DRAFT BUILD BRIEF</span><h3>Personal knowledge continuity agent</h3><dl><div><dt>Problem</dt><dd>{answers[0]}</dd></div><div><dt>MVP scope</dt><dd>Capture one trusted source, remember it with Cognee, and recall it inside one ClawMax workflow.</dd></div><div><dt>Demo success</dt><dd>{answers[3] || "Complete a repeatable task with measurable improvement."}</dd></div></dl><button className="primary">Save canvas & start building</button></div>}
+      </div> : <div className="brief-card"><span>DRAFT BUILD BRIEF</span><h3>Personal knowledge continuity agent</h3><dl><div><dt>Problem</dt><dd>{answers[0]}</dd></div><div><dt>MVP scope</dt><dd>Capture one trusted source, remember it with Cognee, and recall it inside one ClawMax workflow.</dd></div><div><dt>Demo success</dt><dd>{answers[3] || "Complete a repeatable task with measurable improvement."}</dd></div></dl>{saveError && <p className="form-error">{saveError}</p>}<button className="primary" onClick={saveCanvas} disabled={saving || Boolean(savedProjectId)}>{saving ? "Saving…" : savedProjectId ? "Canvas saved" : "Save canvas & start building"}</button></div>}
     </section>
     <aside className="canvas-aside"><span>LIVE CANVAS</span><h3>Your brief takes shape here</h3>{["Project idea", "Problem statement", "MVP scope", "Data sources", "Agent architecture", "Cognee memory role", "Demo success criteria"].map((item, i) => <div className={i < answers.length ? "canvas-item filled" : "canvas-item"} key={item}><b>{i < answers.length ? "✓" : i + 1}</b><span>{item}<small>{i < answers.length ? "Captured from your answer" : "Waiting for context"}</small></span></div>)}</aside>
   </div>;
@@ -177,9 +202,11 @@ function LearningCenter({ setAssistant }: { setAssistant: (v: boolean) => void }
   </>;
 }
 
-function Progress({ milestones: items, done, toggle, progress }: { milestones: readonly (readonly [string, string])[]; done: number[]; toggle: (i: number) => void; progress: number }) {
+function Progress({ milestones: items, done, toggle, progress, selected, setSelected }: { milestones: readonly (readonly [string, string])[]; done: number[]; toggle: (i: number) => void; progress: number; selected: number | null; setSelected: (i: number | null) => void }) {
   return <><div className="page-intro"><div><span className="eyebrow">BUILD CHECKPOINTS</span><h2>Turn a busy day into visible progress.</h2><p>Check items manually now. Connected events can verify them automatically later.</p></div><div className="progress-total"><strong>{progress}%</strong><span><i style={{ width: `${progress}%` }} /></span><small>{done.length} of {items.length} complete</small></div></div>
-  <div className="milestone-grid">{items.map(([name, detail], i) => <button key={name} className={done.includes(i) ? "milestone done" : "milestone"} onClick={() => toggle(i)}><span className="check">{done.includes(i) ? "✓" : i + 1}</span><span><small>MILESTONE {String(i + 1).padStart(2, "0")}</small><h3>{name}</h3><p>{detail}</p></span><b>{done.includes(i) ? "Verified" : "Mark done"}</b></button>)}</div></>;
+  <div className="milestone-grid">{items.map(([name, detail], i) => <button key={name} className={done.includes(i) ? "milestone done" : "milestone"} onClick={() => setSelected(i)}><span className="check">{done.includes(i) ? "✓" : i + 1}</span><span><small>MILESTONE {String(i + 1).padStart(2, "0")}</small><h3>{name}</h3><p>{detail}</p></span><b>{done.includes(i) ? "Verified" : "Open →"}</b></button>)}</div>
+  {selected !== null && <div className="milestone-backdrop" onClick={() => setSelected(null)}><aside className="milestone-detail" onClick={(event) => event.stopPropagation()}><header><span>MILESTONE {String(selected + 1).padStart(2, "0")}</span><button onClick={() => setSelected(null)}>×</button></header><div className="detail-status">{done.includes(selected) ? "✓ COMPLETED" : "NEXT CHECKPOINT"}</div><h2>{items[selected][0]}</h2><p>{items[selected][1]}</p><section><h3>Definition of done</h3><ul><li>You can show concrete evidence for this checkpoint.</li><li>A teammate can repeat or verify the result.</li><li>You recorded what worked and what still needs attention.</li></ul></section><section><h3>Evidence</h3><textarea rows={4} placeholder="Add a test result, link, note, or screenshot description…" /></section><div className="detail-actions"><button className="outline-button" onClick={() => setSelected(null)}>Close</button><button className="primary" onClick={() => { toggle(selected); setSelected(null); }}>{done.includes(selected) ? "Mark incomplete" : "Mark complete"}</button></div></aside></div>}
+  </>;
 }
 
 function Demo() {
