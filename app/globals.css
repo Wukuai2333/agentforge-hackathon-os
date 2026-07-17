@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+.status-rules { background:#f4f0e8;border-top:1px solid #dfdad0; }.rule-heading { padding:14px 18px 4px; }.rule-heading>span { font-size:7px;letter-spacing:1px;font-weight:900;color:#6c6861; }.rule-heading p { margin:5px 0 0;max-width:680px;font-size:7px;line-height:1.5;color:#918d85; }.status-rules .status-guide { padding-top:10px; }.status-rules .status-guide>span { flex:1;min-width:150px;align-items:flex-start; }.status-rules .status-guide>span>i { flex:none;margin-top:2px; }.status-rules .status-guide>span>span { display:block;line-height:1.45; }.status-rules .status-guide b { display:block;margin-bottom:2px; }
+
 @media (max-width:950px){.table-explainer{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:650px){.table-explainer{display:none}.metric-grid.explained article{min-height:auto}.status-guide{flex-direction:column}}
 
