@@ -16,6 +16,20 @@ type OpenAIResponse = {
 
 const SYSTEM_PROMPT_VERSION = "agentforge-tutor-v1";
 
+export async function GET(request: Request) {
+  const participantId = new URL(request.url).searchParams.get("participantId")?.trim();
+  if (!participantId) return Response.json({ error: "Participant id is required." }, { status: 400 });
+  const runtime = env as unknown as { DB: D1Database };
+  const result = await runtime.DB.prepare(
+    `SELECT id, page, user_prompt AS userPrompt, response_text AS responseText,
+            model_name AS modelName, input_tokens AS inputTokens, output_tokens AS outputTokens,
+            status, error_code AS errorCode, created_at AS createdAt
+       FROM prompt_events WHERE anonymous_participant_id = ?
+       ORDER BY created_at DESC LIMIT 50`,
+  ).bind(participantId.slice(0, 100)).all();
+  return Response.json({ messages: result.results.reverse() });
+}
+
 function responseText(result: OpenAIResponse) {
   if (result.output_text?.trim()) return result.output_text.trim();
   return result.output

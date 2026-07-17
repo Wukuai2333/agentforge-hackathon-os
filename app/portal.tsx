@@ -373,7 +373,7 @@ function Admin() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "agentforge-prompt-events.csv"; link.click(); URL.revokeObjectURL(url);
   }
 
-  if (!data) return <><div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>Open the live control room.</h2><p>Real prompts, responses, token usage, and participant identifiers are protected. Enter the Organizer Access Code stored in the local environment file.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void loadOrganizer(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer(code)} disabled={loading || !code}>{loading ? "Opening…" : "Open organizer portal"}</button></div><details className="legacy-demo"><summary>View the previous illustrative demo dashboard</summary><AdminDemo /></details></>;
+  if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>Open the live control room.</h2><p>Only real prompts, responses, token usage, and participant activity are shown here. Enter the Organizer Access Code stored in the local environment file.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void loadOrganizer(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer(code)} disabled={loading || !code}>{loading ? "Opening…" : "Open organizer portal"}</button></div>;
 
   const totalTokens = Number(data.summary.inputTokens) + Number(data.summary.outputTokens);
   const quota = Number(data.settings.defaultTeamTokenQuota);
@@ -388,7 +388,9 @@ function Admin() {
   </>;
 }
 
-function AdminDemo() {
+// Kept temporarily as migration reference; it is never rendered or exposed in Organizer View.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _AdminDemo() {
   const rows = [["Team Synapse", "7/11", "Cognee recall", "82%", "On track"], ["Pocket Pilot", "5/11", "First memory", "67%", "Needs help"], ["Mosaic", "8/11", "Evaluation", "91%", "On track"], ["Echo Lab", "4/11", "ClawMax setup", "58%", "Blocked"]];
   const metrics = [
     { label: "ACTIVE TEAMS", value: "24", trend: "↑ 4 in the last hour", meaning: "Teams with a participant action during the selected time window—such as opening a lesson, running an agent, saving progress, or asking AI." },
@@ -421,6 +423,8 @@ function Settings({ keySaved, setKeySaved }: { keySaved: boolean; setKeySaved: (
   return <div className="settings-layout"><section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>For the prototype, credentials stay in this browser session and are never included in prompt analytics.</p><article className="setting-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax API key</h3><p>Used to guide onboarding and answer build questions.</p></div><span className={keySaved ? "pill on-track" : "pill needs-help"}>{keySaved ? "Connected" : "Not connected"}</span></div><label>API KEY<input type="password" placeholder="clawmax_••••••••••••" /></label><div className="setting-actions"><small>Stored for this session only. Never written to prompt logs.</small><button className="primary" onClick={() => setKeySaved(true)}>Test & save</button></div></article><article className="setting-card"><div className="setting-title"><span className="service-mark green">C</span><div><h3>Cognee endpoint</h3><p>Connect a team dataset through your server-side proxy.</p></div><span className="pill on-track">Connected</span></div><label>ENDPOINT<input defaultValue="https://api.cognee.ai" /></label></article></section><aside className="privacy-card"><span>WHAT WE TRACK</span><h3>Prompt analytics, with boundaries.</h3>{["Anonymized user and team IDs", "Page and tutorial step", "Prompt and assistant response", "Model, latency, tokens, and status", "Helpful / not helpful feedback"].map((item) => <p key={item}>✓ {item}</p>)}<hr />{["Passwords or API keys", "Unselected local files", "Browsing outside this app", "Sensitive data by design"].map((item) => <p className="not-tracked" key={item}>× {item}</p>)}<button className="outline-button">Read data policy</button></aside></div>;
 }
 
+type AssistantHistoryMessage = { id: string; page: string; userPrompt: string; responseText?: string; modelName?: string; inputTokens?: number; outputTokens?: number; status: string; errorCode?: string; createdAt: number };
+
 function Assistant({ close, page, selectedContext }: { close: () => void; page: string; selectedContext: string }) {
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
@@ -430,6 +434,20 @@ function Assistant({ close, page, selectedContext }: { close: () => void; page: 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [usage, setUsage] = useState<{ model: string; inputTokens?: number; outputTokens?: number } | null>(null);
+  const [history, setHistory] = useState<AssistantHistoryMessage[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  async function loadHistory() {
+    let participantId = sessionStorage.getItem("agentforge_participant_id");
+    if (!participantId) { participantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", participantId); }
+    try {
+      const response = await fetch(`/api/assistant?participantId=${encodeURIComponent(participantId)}`);
+      const result = await response.json() as { messages?: AssistantHistoryMessage[] };
+      if (response.ok) setHistory(result.messages || []);
+    } finally { setHistoryLoading(false); }
+  }
+
+  useEffect(() => { const timer = window.setTimeout(() => void loadHistory(), 0); return () => window.clearTimeout(timer); }, []);
 
   async function ask() {
     if (!text.trim() || loading) return;
@@ -446,6 +464,7 @@ function Assistant({ close, page, selectedContext }: { close: () => void; page: 
       setAnswer(result.answer);
       setPromptEventId(result.eventId || "");
       setUsage({ model: result.model || "OpenAI", inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      setHistory((items) => [...items, { id: result.eventId || crypto.randomUUID(), page, userPrompt: promptToSend, responseText: result.answer, modelName: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, status: "success", createdAt: Date.now() }]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "The assistant could not answer right now.");
     } finally {
@@ -465,5 +484,7 @@ function Assistant({ close, page, selectedContext }: { close: () => void; page: 
     } catch { setBrainStatus("error"); }
   }
 
-  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Page-aware · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p></div><div className={`assistant-chat ${submittedPrompt ? "has-messages" : ""}`}>{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Using this page and your question.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button>Helpful</button><button>Not helpful</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to team brain" : brainStatus === "error" ? "Try adding again" : "＋ Add to team brain"}</button></div></div> : !submittedPrompt ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page and the selected text. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Prompts and answers are recorded to improve this event. Never paste credentials.</small></footer></aside></div>;
+  const visibleHistory = history.filter((item) => item.id !== promptEventId);
+  const hasConversation = visibleHistory.length > 0 || Boolean(submittedPrompt);
+  return <div className="assistant-backdrop" onClick={close}><aside className="assistant" onClick={(e) => e.stopPropagation()}><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · History saved · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Using this page and your question.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button>Helpful</button><button>Not helpful</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to team brain" : brainStatus === "error" ? "Try adding again" : "＋ Add to team brain"}</button></div></div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page and the selected text. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored from Prompt Tracking. Never paste credentials.</small></footer></aside></div>;
 }
