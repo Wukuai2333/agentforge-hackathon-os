@@ -8,8 +8,6 @@ const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
   { id: "onboarding", icon: "✦", label: "Agent Canvas" },
   { id: "learn", icon: "▤", label: "Learning Center" },
-  { id: "clawmaxTutorial", icon: "C", label: "ClawMax Tutorial" },
-  { id: "cogneeTutorial", icon: "◎", label: "Cognee Tutorial" },
   { id: "progress", icon: "◎", label: "Build Progress" },
   { id: "demo", icon: "▶", label: "Demo & Evaluation" },
 ];
@@ -88,7 +86,7 @@ export function HackathonPortal() {
         <nav aria-label="Main navigation">
           <p className="nav-label">YOUR HACKATHON</p>
           {nav.map((item) => (
-            <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}${item.id === "clawmaxTutorial" || item.id === "cogneeTutorial" ? " tutorial-nav-item" : ""}`} onClick={() => setView(item.id)}>
+            <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
               {item.id === "progress" && <span className="nav-badge">{done.length}/{milestones.length}</span>}
             </button>
@@ -115,7 +113,7 @@ export function HackathonPortal() {
           {view === "onboarding" && (
             <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
           )}
-          {view === "learn" && <LearningCenter setAssistant={setAssistant} />}
+          {view === "learn" && <LearningCenter setAssistant={setAssistant} setView={setView} />}
           {view === "clawmaxTutorial" && <ClawMaxTutorial />}
           {view === "cogneeTutorial" && <CogneeTutorial setAssistant={setAssistant} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
@@ -198,16 +196,36 @@ function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers, 
   </div>;
 }
 
-function LearningCenter({ setAssistant }: { setAssistant: (v: boolean) => void }) {
+function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) => void; setView: (view: View) => void }) {
   return <>
-    <div className="page-intro"><div><span className="eyebrow">TASK-BASED · OFFICIAL SOURCES</span><h2>Learn only what you need to build.</h2><p>Short, practical lessons connected to your milestones. Select any text on this page to ask the AI assistant.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
-    <div className="learning-layout"><section className="lesson-list">{lessons.map((lesson, i) => <article className="lesson" key={lesson.n}><span className={`lesson-number ${lesson.color}`}>{lesson.n}</span><div><small>{lesson.meta}</small><h3>{lesson.title}</h3><div className="lesson-bar"><i style={{ width: i === 0 ? "100%" : i === 1 ? "54%" : "0%" }} /></div></div><button disabled={lesson.status === "Locked"}>{lesson.status} {lesson.status !== "Locked" && "→"}</button></article>)}</section>
-    <aside className="memory-loop"><span>COGNEE MEMORY LOOP</span><h3>One loop. Five moves.</h3>{["Add / Remember data", "Cognify / Build memory", "Search / Recall", "Collect feedback", "Improve the agent"].map((item, i) => <div key={item}><b>{i + 1}</b><span>{item}</span>{i < 4 && <i>↓</i>}</div>)}<a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">Open official Cognee docs ↗</a></aside></div>
+    <div className="page-intro"><div><span className="eyebrow">YOUR HACKATHON LEARNING HUB</span><h2>Learn only what you need to build.</h2><p>Start with the tool you need now, then return to the build path below. Each tutorial is designed around something your team can demonstrate—not passive reading.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
+    <section className="tutorial-library" aria-label="Tutorial library">
+      <button className="tutorial-library-card clawmax" onClick={() => setView("clawmaxTutorial")}>
+        <span className="library-mark">C</span><span className="library-status pending">WAITING FOR MAX</span>
+        <small>CLAWMAX · OFFICIAL MATERIALS PENDING</small><h3>Build your ClawMax agent</h3>
+        <p>This space will contain the verified setup and agent-building walkthrough once Max provides the official material.</p>
+        <b>Open placeholder →</b>
+      </button>
+      <button className="tutorial-library-card cognee" onClick={() => setView("cogneeTutorial")}>
+        <span className="library-mark">◎</span><span className="library-status available">DEMO AVAILABLE</span>
+        <small>COGNEE · FIVE-STEP MEMORY LOOP</small><h3>Give your agent long-term memory</h3>
+        <p>Practice Add, Cognify, Search, Feedback, and Improve in one guided walkthrough with expected evidence.</p>
+        <b>Start demo tutorial →</b>
+      </button>
+    </section>
+    <section className="tutor-team-note">
+      <div className="tutor-team-icon">✦</div>
+      <div><span className="eyebrow">PROPOSED CLAWMAX AGENTIC TUTOR TEAM</span><h3>Help participants learn sponsor tools while they build.</h3><p>A team of ClawMax tutor agents could answer step-specific questions, explain ClawMax and Cognee concepts, recommend the next tutorial, and pass unresolved issues—with page and project context—to a human mentor.</p></div>
+      <aside><span>MEETING WITH MAX</span><b>Confirm capabilities, tool access, escalation rules, and how tutor agents should improve from participant feedback.</b></aside>
+    </section>
+    <div className="learning-section-title"><div><span className="eyebrow">RECOMMENDED BUILD PATH</span><h3>From idea to measurable improvement</h3></div><p>These lessons will unlock as the real platform records completed tutorial steps and build evidence.</p></div>
+    <div className="learning-layout"><section className="lesson-list">{lessons.map((lesson, i) => <article className="lesson" key={lesson.n}><span className={`lesson-number ${lesson.color}`}>{lesson.n}</span><div><small>{lesson.meta}</small><h3>{lesson.title}</h3><div className="lesson-bar"><i style={{ width: i === 0 ? "100%" : i === 1 ? "54%" : "0%" }} /></div></div><button disabled={lesson.status === "Locked"} onClick={() => lesson.n === "02" ? setView("clawmaxTutorial") : lesson.n === "03" ? setView("cogneeTutorial") : undefined}>{lesson.status} {lesson.status !== "Locked" && "→"}</button></article>)}</section>
+    <aside className="memory-loop"><span>HOW TO USE THIS CENTER</span><h3>Learn, build, prove.</h3>{["Open the tutorial for your current step", "Try the task in your own project", "Save evidence in Build Progress", "Ask AI when you get stuck", "Return after feedback and improve"].map((item, i) => <div key={item}><b>{i + 1}</b><span>{item}</span>{i < 4 && <i>↓</i>}</div>)}<a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">Open official Cognee docs ↗</a></aside></div>
   </>;
 }
 
 function ClawMaxTutorial() {
-  return <div className="waiting-page"><div className="waiting-mark">C</div><span className="eyebrow">CLAWMAX TUTORIAL</span><h2>Waiting for Max.</h2><p>This page is reserved for the official ClawMax tutorial. Product steps, screenshots, terminology, and integration instructions will be added after Max provides or verifies the source materials.</p><div className="waiting-status"><span>CONTENT STATUS</span><b>Official materials pending</b></div></div>;
+  return <div className="waiting-page"><div className="waiting-mark">C</div><span className="eyebrow">CLAWMAX TUTORIAL</span><h2>Waiting for Max.</h2><p>This page is reserved for the official ClawMax tutorial. Product steps, screenshots, terminology, and integration instructions will be added after Max provides or verifies the source materials.</p><div className="waiting-status"><span>CONTENT STATUS</span><b>Official materials pending</b></div><div className="waiting-proposal"><span>MEETING NOTE</span><p>Discuss adding a ClawMax Agentic Tutor Team that helps participants learn sponsor tools, answers questions with tutorial and project context, and escalates unresolved issues to human mentors.</p></div></div>;
 }
 
 function CogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
