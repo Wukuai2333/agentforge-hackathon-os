@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "progress" | "demo" | "admin" | "settings";
+type View = "home" | "onboarding" | "learn" | "progress" | "demo" | "team" | "admin" | "settings";
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
@@ -42,7 +42,6 @@ export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
   const [done, setDone] = useState<number[]>([0, 1, 2]);
   const [assistant, setAssistant] = useState(false);
-  const [teamMode, setTeamMode] = useState(true);
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
   const [surveyAnswers, setSurveyAnswers] = useState<string[]>([]);
@@ -58,7 +57,7 @@ export function HackathonPortal() {
     "What should the agent remember between sessions?",
   ];
 
-  const title = useMemo(() => nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   function toggleMilestone(index: number) {
     setDone((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
@@ -93,7 +92,7 @@ export function HackathonPortal() {
             </button>
           ))}
           <p className="nav-label">TEAM SPACE</p>
-          <button className="nav-item" onClick={() => setTeamMode(!teamMode)}><Icon>♧</Icon>Shared Brain<span className={teamMode ? "status-dot on" : "status-dot"} /></button>
+          <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
         </nav>
 
@@ -117,6 +116,7 @@ export function HackathonPortal() {
           {view === "learn" && <LearningCenter setAssistant={setAssistant} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
+          {view === "team" && <TeamSpace />}
           {view === "admin" && <Admin />}
           {view === "settings" && <Settings keySaved={keySaved} setKeySaved={setKeySaved} />}
         </section>
@@ -149,7 +149,7 @@ function Overview({ progress, setView }: { progress: number; setView: (view: Vie
       <button className="move-card accent-lime" onClick={() => setView("progress")}><span className="move-icon">✓</span><small>BUILD · MILESTONE 04</small><h4>Store your first<br />useful memory</h4><p>Prove recall with one test.</p><b>Open milestone →</b></button>
       <button className="move-card accent-orange" onClick={() => setView("demo")}><span className="move-icon">◇</span><small>PREP · MIDPOINT</small><h4>Define how you’ll<br />measure success</h4><p>Make improvement visible.</p><b>Create evaluation →</b></button>
     </div>
-    <article className="team-strip"><div><span className="team-logo">S</span><div><small>TEAM SYNAPSE</small><h4>Your shared brain is active</h4></div></div><div className="team-stats"><span><b>3</b><small>MEMBERS</small></span><span><b>24</b><small>MEMORIES</small></span><span><b>7</b><small>QUESTIONS</small></span></div><button>Open team space →</button></article>
+    <article className="team-strip"><div><span className="team-logo">S</span><div><small>TEAM SYNAPSE</small><h4>Your shared brain is active</h4></div></div><div className="team-stats"><span><b>3</b><small>MEMBERS</small></span><span><b>24</b><small>MEMORIES</small></span><span><b>7</b><small>QUESTIONS</small></span></div><button onClick={() => setView("team")}>Open team space →</button></article>
   </>;
 }
 
@@ -211,6 +211,39 @@ function Progress({ milestones: items, done, toggle, progress, selected, setSele
 
 function Demo() {
   return <div className="demo-layout"><section><span className="eyebrow">FINAL STORY</span><h2>Show the change,<br />not just the agent.</h2><p>Your strongest demo compares the same task before and after feedback.</p><div className="upload-zone"><span>▶</span><h3>Drop your 60–90 second demo here</h3><p>MP4, MOV, or a shareable video link</p><button className="outline-button">Choose video</button></div></section><aside className="demo-checklist"><span>YOUR DEMO SHOULD PROVE</span>{["The real problem", "A working end-to-end task", "Before vs. after", "A repeatable success test", "What the agent learned", "How memory was used", "Data and privacy choices"].map((item, i) => <label key={item}><input type="checkbox" /> <b>{String(i + 1).padStart(2, "0")}</b><span>{item}</span></label>)}<button className="primary">Save demo draft</button></aside></div>;
+}
+
+function TeamSpace() {
+  const [tab, setTab] = useState<"activity" | "memories" | "questions">("activity");
+  const activity = [
+    { avatar: "YR", color: "violet", person: "Yuxin", action: "saved an Agent Canvas", detail: "Personal knowledge continuity agent", meta: "2 min ago · Visible to Team Synapse", icon: "✦" },
+    { avatar: "AM", color: "orange", person: "Amina", action: "shared a memory", detail: "User interview notes — planning pain points", meta: "18 min ago · Cognee / team-synapse", icon: "▤" },
+    { avatar: "JL", color: "blue", person: "Jason", action: "completed a milestone", detail: "First agent working", meta: "31 min ago · Evidence attached", icon: "✓" },
+    { avatar: "AM", color: "orange", person: "Amina", action: "asked the team brain", detail: "What preferences did our interviews reveal?", meta: "44 min ago · 3 sources used", icon: "?" },
+  ];
+  const memories = [
+    ["User interview notes", "Amina", "8 concepts · 14 relationships", "Team"],
+    ["Agent Canvas — v1", "Yuxin", "Problem, scope, data boundaries", "Team"],
+    ["ClawMax test run #04", "Jason", "Successful end-to-end run", "Team"],
+    ["Mentor feedback", "Yuxin", "Evaluation and privacy suggestions", "Private"],
+  ];
+  const questions = [
+    ["What preferences did our interviews reveal?", "Amina", "Answered · 3 sources"],
+    ["What changed after mentor feedback?", "Yuxin", "Answered · 2 sources"],
+    ["Which test cases are still failing?", "Jason", "Needs answer"],
+  ];
+
+  return <>
+    <div className="demo-notice"><span>DEMO VIEW</span><div><strong>This is an example of Team Space before real participant data exists.</strong><p>During the hackathon, this page will populate only when team members save canvases, share memories, ask the team brain, or complete milestones.</p></div></div>
+    <div className="team-hero"><div><span className="team-logo large">S</span><div><span className="eyebrow">TEAM SYNAPSE · SHARED WORKSPACE</span><h2>Build with one shared context.</h2><p>See what teammates decided, contributed, tested, and learned—without merging everyone’s private information.</p></div></div><button className="outline-button">＋ Invite teammate</button></div>
+    <div className="team-metric-grid"><article><small>TEAM MEMBERS</small><strong>3</strong><span>All active today</span></article><article><small>SHARED MEMORIES</small><strong>24</strong><span>3 added this hour</span></article><article><small>TEAM QUESTIONS</small><strong>7</strong><span>6 answered with sources</span></article><article><small>MILESTONES</small><strong>7/11</strong><span>Next: evaluation case</span></article></div>
+    <div className="team-space-grid"><section className="team-feed"><div className="team-tabs"><div>{(["activity", "memories", "questions"] as const).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div><span>Demo data</span></div>
+      {tab === "activity" && <div className="activity-list">{activity.map((item) => <article key={item.detail}><span className={`member-avatar ${item.color}`}>{item.avatar}</span><div><p><strong>{item.person}</strong> {item.action}</p><h3><span>{item.icon}</span>{item.detail}</h3><small>{item.meta}</small></div><button aria-label={`Open ${item.detail}`}>→</button></article>)}</div>}
+      {tab === "memories" && <div className="shared-list">{memories.map(([title, person, detail, scope]) => <article key={title}><span className="list-icon">▤</span><div><h3>{title}</h3><p>Shared by {person} · {detail}</p></div><span className={scope === "Team" ? "scope team" : "scope private"}>{scope}</span><button>Open →</button></article>)}</div>}
+      {tab === "questions" && <div className="shared-list">{questions.map(([question, person, status]) => <article key={question}><span className="list-icon">?</span><div><h3>{question}</h3><p>Asked by {person}</p></div><span className="question-status">{status}</span><button>Open →</button></article>)}</div>}
+    </section>
+    <aside className="real-event-guide"><span>IN THE REAL HACKATHON</span><h3>What makes something appear here?</h3><div><b>01</b><p><strong>A member chooses “Share with team.”</strong>The Canvas, memory, question, or evidence becomes visible to teammates.</p></div><div><b>02</b><p><strong>The system records the action.</strong>Who did what, when, and which tool or dataset was used appears in Activity.</p></div><div><b>03</b><p><strong>Teammates can reuse it.</strong>They can open the contribution, cite it in a question, or use it in their agent workflow.</p></div><div><b>04</b><p><strong>Private stays private.</strong>Personal drafts and memories remain hidden unless the owner explicitly changes their sharing scope.</p></div><hr /><p className="guide-note"><strong>What you see now:</strong> Yuxin, Amina, Jason, their memories, questions, and activity are illustrative demo records. Real participant actions will replace these examples after authentication, team membership, and Cognee event tracking are connected.</p></aside></div>
+  </>;
 }
 
 function Admin() {
