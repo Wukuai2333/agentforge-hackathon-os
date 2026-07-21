@@ -42,6 +42,9 @@ export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
   const [done, setDone] = useState<number[]>([0, 1, 2]);
   const [assistant, setAssistant] = useState(false);
+  const [assistantOpened, setAssistantOpened] = useState(false);
+  const [assistantWorking, setAssistantWorking] = useState(false);
+  const [viewRestored, setViewRestored] = useState(false);
   const [assistantContext, setAssistantContext] = useState("");
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
@@ -57,6 +60,30 @@ export function HackathonPortal() {
     "What observable result would prove the agent is useful?",
     "What should the agent remember between sessions?",
   ];
+
+  useEffect(() => {
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "settings"];
+    const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
+    const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
+    const onHashChange = () => { const next = window.location.hash.replace(/^#\/?/, ""); if (validViews.includes(next as View)) setView(next as View); };
+    window.addEventListener("hashchange", onHashChange);
+    return () => { window.clearTimeout(restoreTimer); window.removeEventListener("hashchange", onHashChange); };
+  }, []);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    window.localStorage.setItem("agentforge_current_view", view);
+    const nextHash = `#/${view}`;
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+  }, [view, viewRestored]);
+
+  useEffect(() => {
+    const updateWorking = (event: Event) => setAssistantWorking(Boolean((event as CustomEvent<boolean>).detail));
+    window.addEventListener("agentforge-assistant-working", updateWorking);
+    return () => window.removeEventListener("agentforge-assistant-working", updateWorking);
+  }, []);
+
+  function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
   const title = useMemo(() => view === "team" ? "Team Space" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
@@ -74,7 +101,7 @@ export function HackathonPortal() {
   return (
     <div className="app-shell" onMouseUp={() => {
       const selected = typeof window !== "undefined" ? window.getSelection()?.toString().trim() : "";
-      if (selected && selected.length > 2) { setAssistantContext(selected); setAssistant(true); }
+      if (selected && selected.length > 2) { setAssistantContext(selected); openAssistant(); }
     }}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView("home")} aria-label="AgentForge home">
@@ -106,7 +133,7 @@ export function HackathonPortal() {
       <main className="main">
         <header className="topbar">
           <div><p>PERSONAL AGENT HACKATHON</p><h1>{title}</h1></div>
-          <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={() => setAssistant(true)}>✦ Ask AI</button></div>
+          <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={openAssistant}>✦ Ask AI</button></div>
         </header>
 
         <section className="content">
@@ -114,9 +141,9 @@ export function HackathonPortal() {
           {view === "onboarding" && (
             <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
           )}
-          {view === "learn" && <LearningCenter setAssistant={setAssistant} setView={setView} />}
+          {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
           {view === "clawmaxTutorial" && <ClawMaxTutorial />}
-          {view === "cogneeTutorial" && <CogneeTutorial setAssistant={setAssistant} />}
+          {view === "cogneeTutorial" && <CogneeTutorial setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
@@ -125,7 +152,8 @@ export function HackathonPortal() {
         </section>
       </main>
 
-      {assistant && <Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} />}
+      {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} /></div>}
+      {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
     </div>
   );
 }
@@ -259,7 +287,46 @@ function Demo() {
   return <div className="demo-layout"><section><span className="eyebrow">FINAL STORY</span><h2>Show the change,<br />not just the agent.</h2><p>Your strongest demo compares the same task before and after feedback.</p><div className="upload-zone"><span>▶</span><h3>Drop your 60–90 second demo here</h3><p>MP4, MOV, or a shareable video link</p><button className="outline-button">Choose video</button></div></section><aside className="demo-checklist"><span>YOUR DEMO SHOULD PROVE</span>{["The real problem", "A working end-to-end task", "Before vs. after", "A repeatable success test", "What the agent learned", "How memory was used", "Data and privacy choices"].map((item, i) => <label key={item}><input type="checkbox" /> <b>{String(i + 1).padStart(2, "0")}</b><span>{item}</span></label>)}<button className="primary">Save demo draft</button></aside></div>;
 }
 
-type SharedNote = { id: string; authorName: string; content: string; sourceType: "manual" | "assistant"; createdAt: number };
+type NoteAttribution = { text: string; editorName: string; color: string };
+type SharedNote = { id: string; authorName: string; content: string; sourceType: "manual" | "assistant"; attributionJson?: string; updatedByName?: string; updatedAt?: number; createdAt: number };
+
+const memberColors = ["violet", "orange", "blue", "green", "pink"];
+function colorForMember(name: string) { return memberColors[[...name].reduce((total, char) => total + char.charCodeAt(0), 0) % memberColors.length]; }
+function noteAttributions(note: SharedNote): NoteAttribution[] {
+  try { const value = JSON.parse(note.attributionJson || "[]") as NoteAttribution[]; if (Array.isArray(value) && value.map((item) => item.text).join("") === note.content) return value; } catch { /* old notes fall back to their original author */ }
+  return [{ text: note.content, editorName: note.authorName, color: colorForMember(note.authorName) }];
+}
+function attributeEdit(note: SharedNote, next: string, editorName: string) {
+  const previous = note.content;
+  const chars = noteAttributions(note).flatMap((part) => [...part.text].map((text) => ({ text, editorName: part.editorName, color: part.color })));
+  let prefix = 0; while (prefix < previous.length && prefix < next.length && previous[prefix] === next[prefix]) prefix++;
+  let suffix = 0; while (suffix < previous.length - prefix && suffix < next.length - prefix && previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix++;
+  const attributed = [...chars.slice(0, prefix), ...[...next.slice(prefix, next.length - suffix)].map((text) => ({ text, editorName, color: colorForMember(editorName) })), ...chars.slice(previous.length - suffix)];
+  return attributed.reduce<NoteAttribution[]>((parts, char) => { const last = parts.at(-1); if (last && last.editorName === char.editorName && last.color === char.color) last.text += char.text; else parts.push({ ...char }); return parts; }, []);
+}
+
+function SharedNoteCard({ note, onUpdated }: { note: SharedNote; onUpdated: (note: SharedNote) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note.content);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const editorName = "Yuxin Ren";
+  async function save() {
+    if (!draft.trim() || draft.trim() === note.content) { setEditing(false); return; }
+    setSaving(true); setError("");
+    let authorId = sessionStorage.getItem("agentforge_participant_id");
+    if (!authorId) { authorId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", authorId); }
+    const attributionJson = JSON.stringify(attributeEdit(note, draft.trim(), editorName));
+    try {
+      const response = await fetch("/api/team-notes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ noteId: note.id, teamId: "team-synapse-demo", authorId, authorName: editorName, content: draft, attributionJson }) });
+      const result = await response.json() as { note?: Partial<SharedNote>; error?: string };
+      if (!response.ok || !result.note) throw new Error(result.error || "Note could not be updated.");
+      onUpdated({ ...note, ...result.note, attributionJson }); setEditing(false);
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Note could not be updated."); }
+    finally { setSaving(false); }
+  }
+  return <article><header><span className={`member-avatar ${colorForMember(note.authorName)}`}>{note.authorName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{note.authorName}</strong><small>{new Date(note.createdAt).toLocaleString()} · {note.updatedAt ? `Edited by ${note.updatedByName} ${new Date(note.updatedAt).toLocaleString()}` : note.sourceType === "assistant" ? "Saved from AI Assistant" : "Added by team member"}</small></div><span className={note.sourceType === "assistant" ? "note-source ai" : "note-source"}>{note.sourceType === "assistant" ? "AI NOTE" : "TEAM NOTE"}</span><button className="note-edit-button" onClick={() => { setDraft(note.content); setEditing(true); }}>Edit</button></header>{editing ? <div className="note-editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={5} /><div>{error && <small className="form-error">{error}</small>}<button className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="primary" onClick={() => void save()} disabled={saving || !draft.trim()}>{saving ? "Saving…" : "Save changes"}</button></div></div> : <p className="attributed-note">{noteAttributions(note).map((part, index) => <span key={`${part.editorName}-${index}`} className={`note-attribution ${part.color}`} title={`${part.editorName} added or edited this text`}>{part.text}</span>)}</p>}</article>;
+}
 
 function TeamSpace() {
   const [tab, setTab] = useState<"activity" | "notes" | "memories" | "questions">("notes");
@@ -314,7 +381,7 @@ function TeamSpace() {
     <div className="team-metric-grid"><article><small>TEAM MEMBERS</small><strong>3</strong><span>All active today</span></article><article><small>SHARED MEMORIES</small><strong>24</strong><span>3 added this hour</span></article><article><small>TEAM QUESTIONS</small><strong>7</strong><span>6 answered with sources</span></article><article><small>MILESTONES</small><strong>7/11</strong><span>Next: evaluation case</span></article></div>
     <div className="team-space-grid"><section className="team-feed"><div className="team-tabs"><div>{(["activity", "notes", "memories", "questions"] as const).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div><span>{tab === "notes" ? "Live shared data" : "Demo data"}</span></div>
       {tab === "activity" && <div className="activity-list">{activity.map((item) => <article key={item.detail}><span className={`member-avatar ${item.color}`}>{item.avatar}</span><div><p><strong>{item.person}</strong> {item.action}</p><h3><span>{item.icon}</span>{item.detail}</h3><small>{item.meta}</small></div><button aria-label={`Open ${item.detail}`}>→</button></article>)}</div>}
-      {tab === "notes" && <div className="shared-notes"><div className="note-composer"><textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} rows={3} placeholder="Add a useful decision, finding, reminder, or AI answer for your team…" /><div><small>Visible to everyone in Team Synapse</small><button className="primary" onClick={() => void addNote()} disabled={!noteDraft.trim()}>＋ Add note</button></div></div>{noteError && <p className="form-error">{noteError}</p>}{notesLoading ? <p className="notes-empty">Loading shared notes…</p> : notes.length === 0 ? <p className="notes-empty">No shared notes yet. Add the first note here or save an AI answer from the Assistant.</p> : <div className="note-list">{notes.map((note) => <article key={note.id}><header><span className="member-avatar violet">{note.authorName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{note.authorName}</strong><small>{new Date(note.createdAt).toLocaleString()} · {note.sourceType === "assistant" ? "Saved from AI Assistant" : "Added by team member"}</small></div><span className={note.sourceType === "assistant" ? "note-source ai" : "note-source"}>{note.sourceType === "assistant" ? "AI NOTE" : "TEAM NOTE"}</span></header><p>{note.content}</p></article>)}</div>}</div>}
+      {tab === "notes" && <div className="shared-notes"><div className="note-composer"><textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} rows={3} placeholder="Add a useful decision, finding, reminder, or AI answer for your team…" /><div><small>Visible to everyone in Team Synapse</small><button className="primary" onClick={() => void addNote()} disabled={!noteDraft.trim()}>＋ Add note</button></div></div>{noteError && <p className="form-error">{noteError}</p>}{notesLoading ? <p className="notes-empty">Loading shared notes…</p> : notes.length === 0 ? <p className="notes-empty">No shared notes yet. Add the first note here or save an AI answer from the Assistant.</p> : <div className="note-list">{notes.map((note) => <SharedNoteCard key={note.id} note={note} onUpdated={(updated) => setNotes((items) => items.map((item) => item.id === updated.id ? updated : item))} />)}</div>}</div>}
       {tab === "memories" && <div className="shared-list">{memories.map(([title, person, detail, scope]) => <article key={title}><span className="list-icon">▤</span><div><h3>{title}</h3><p>Shared by {person} · {detail}</p></div><span className={scope === "Team" ? "scope team" : "scope private"}>{scope}</span><button>Open →</button></article>)}</div>}
       {tab === "questions" && <div className="shared-list">{questions.map(([question, person, status]) => <article key={question}><span className="list-icon">?</span><div><h3>{question}</h3><p>Asked by {person}</p></div><span className="question-status">{status}</span><button>Open →</button></article>)}</div>}
     </section>
@@ -454,6 +521,8 @@ function Assistant({ close, page, selectedContext }: { close: () => void; page: 
   const [usage, setUsage] = useState<{ model: string; inputTokens?: number; outputTokens?: number } | null>(null);
   const [history, setHistory] = useState<AssistantHistoryMessage[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => { window.dispatchEvent(new CustomEvent("agentforge-assistant-working", { detail: loading })); }, [loading]);
 
   async function loadHistory() {
     let participantId = sessionStorage.getItem("agentforge_participant_id");

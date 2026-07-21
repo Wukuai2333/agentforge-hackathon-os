@@ -160,10 +160,26 @@ export const sharedNotes = sqliteTable("shared_notes", {
   content: text("content").notNull(),
   sourceType: text("source_type", { enum: ["manual", "assistant"] }).notNull().default("manual"),
   sourcePromptEventId: text("source_prompt_event_id"),
+  attributionJson: text("attribution_json"),
+  updatedById: text("updated_by_id"),
+  updatedByName: text("updated_by_name"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
 }, (table) => [
   index("shared_notes_team_created_idx").on(table.teamId, table.createdAt),
 ]);
+
+export const sharedNoteRevisions = sqliteTable("shared_note_revisions", {
+  id: text("id").primaryKey(),
+  noteId: text("note_id").notNull(),
+  teamId: text("team_id").notNull(),
+  editorId: text("editor_id").notNull(),
+  editorName: text("editor_name").notNull(),
+  previousContent: text("previous_content").notNull(),
+  nextContent: text("next_content").notNull(),
+  attributionJson: text("attribution_json").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("shared_note_revisions_note_idx").on(table.noteId, table.createdAt)]);
 
 export const organizerSettings = sqliteTable("organizer_settings", {
   id: text("id").primaryKey(),
