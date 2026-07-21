@@ -39,6 +39,7 @@ function Icon({ children }: { children: React.ReactNode }) {
 }
 
 type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
+type PublishedAnnouncement = { id: string; announcementText: string; action: "published" | "updated"; createdAt: number };
 
 function LiveEvent({ config }: { config: EventConfig | null }) {
   const [now, setNow] = useState(0);
@@ -66,6 +67,8 @@ export function HackathonPortal() {
   const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [selectedMilestone, setSelectedMilestone] = useState<number | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
+  const [publishedAnnouncements, setPublishedAnnouncements] = useState<PublishedAnnouncement[]>([]);
+  const [announcementHistoryOpen, setAnnouncementHistoryOpen] = useState(false);
   const progress = Math.round((done.length / milestones.length) * 100);
   const surveyQuestions = [
     "What recurring problem in your life would you most like an agent to solve?",
@@ -97,7 +100,7 @@ export function HackathonPortal() {
     return () => window.removeEventListener("agentforge-assistant-working", updateWorking);
   }, []);
 
-  useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig }; if (response.ok) setEventConfig(result.config || null); } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
+  useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig; publishedAnnouncements?: PublishedAnnouncement[] }; if (response.ok) { setEventConfig(result.config || null); setPublishedAnnouncements(result.publishedAnnouncements || []); } } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
@@ -154,7 +157,7 @@ export function HackathonPortal() {
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
           <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={openAssistant}>✦ Ask AI</button></div>
         </header>
-        {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small></div>}
+        {eventConfig?.announcementActive && eventConfig.announcementText && <button className="global-announcement" type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()} · View history →` : "View history →"}</small></button>}
 
         <section className="content">
           {view === "home" && <Overview progress={progress} setView={setView} />}
@@ -175,6 +178,7 @@ export function HackathonPortal() {
 
       {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} /></div>}
       {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
+      {announcementHistoryOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAnnouncementHistoryOpen(false)}><section className="participant-announcement-history" role="dialog" aria-modal="true" aria-labelledby="announcement-history-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">EVENT UPDATES</span><h2 id="announcement-history-title">Published announcements</h2></div><button type="button" onClick={() => setAnnouncementHistoryOpen(false)} aria-label="Close announcement history">×</button></header><div>{publishedAnnouncements.length ? publishedAnnouncements.map((item) => <article key={item.id}><small>{new Date(item.createdAt).toLocaleString()}</small><p>{item.announcementText}</p></article>) : <p className="notes-empty">No earlier published announcements yet.</p>}</div></section></div>}
     </div>
   );
 }
@@ -431,7 +435,6 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   const [accessCode, setAccessCode] = useState("");
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
   const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
-  const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(false);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", announcementText: config?.announcementText || "", announcementActive: config?.announcementActive === true || config?.announcementActive === 1, registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
   const [error, setError] = useState("");
@@ -474,12 +477,13 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
         <div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div>
         <label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
         <label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label>
-        <div className="announcement-editor"><div className="announcement-editor-title"><span>WEBSITE ANNOUNCEMENT</span><button type="button" onClick={() => setShowAnnouncementHistory((visible) => !visible)}>{showAnnouncementHistory ? "Hide history" : `View history (${announcementHistory.length})`}</button></div><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small>{showAnnouncementHistory && <div className="announcement-history">{announcementHistory.length ? announcementHistory.map((item) => <article key={item.id}><header><span className={`pill ${item.active ? "on-track" : "needs-help"}`}>{item.action}</span><small>{new Date(item.createdAt).toLocaleString()} · {item.editorName}</small></header><p>{item.announcementText || "Announcement removed"}</p></article>) : <p className="notes-empty">No announcement changes recorded yet.</p>}</div>}</div>
+        <div className="announcement-editor"><span>WEBSITE ANNOUNCEMENT</span><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small></div>
         <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>
         {error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : form.announcementActive ? "Save & publish" : "Save event settings"}</button>
       </section>
       <aside className="event-preview-card"><span>PARTICIPANT PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} />{form.announcementActive && form.announcementText && <div className="announcement-preview"><b>EVENT ANNOUNCEMENT</b><p>{form.announcementText}</p></div>}<p>The countdown and announcement use saved event data. No AI or tokens are used.</p></aside>
     </div>
+    <section className="announcement-directory"><div className="table-title"><div><h3>Published Announcement History</h3><p>{announcementHistory.filter((item) => item.active).length} published records · participants can open these from the green announcement bar</p></div></div><div className="announcement-admin-table"><div className="announcement-admin-row heading"><span>STATUS</span><span>ANNOUNCEMENT</span><span>PUBLISHED</span><span>BY</span></div>{announcementHistory.filter((item) => item.active).map((item) => <div className="announcement-admin-row" key={item.id}><span className="pill on-track">{item.action}</span><p>{item.announcementText}</p><span>{new Date(item.createdAt).toLocaleString()}</span><span>{item.editorName}</span></div>)}{!announcementHistory.some((item) => item.active) && <p className="notes-empty">No announcements have been published yet.</p>}</div></section>
     <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} records · authenticated registrations and current prototype participants</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="participant-table"><div className="participant-row heading"><span>NAME</span><span>EMAIL</span><span>ROLE</span><span>TEAM</span><span>STATUS</span><span>JOINED</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><strong>{participant.displayName}</strong><span>{participant.email || "Not collected"}</span><span>{participant.role}</span><span>{participant.teamName || "Unassigned"}</span><span className={`pill ${participant.status === "active" ? "on-track" : "needs-help"}`}>{participant.status}</span><span>{new Date(participant.joinedAt).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
   </div>;
 }

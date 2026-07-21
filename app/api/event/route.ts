@@ -10,7 +10,11 @@ export async function GET(request: Request) {
     announcement_active AS announcementActive, announcement_updated_at AS announcementUpdatedAt,
     registration_open AS registrationOpen, updated_at AS updatedAt
     FROM event_configuration WHERE id='primary'`).first();
-  if (!authorized(request, runtime)) return Response.json({ config });
+  const publishedAnnouncements = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText,
+    action, created_at AS createdAt FROM event_announcement_history
+    WHERE active=1 AND announcement_text IS NOT NULL
+    ORDER BY created_at DESC LIMIT 100`).all();
+  if (!authorized(request, runtime)) return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
   const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role, ep.status,
     ep.joined_at AS joinedAt, t.name AS teamName
     FROM event_participants ep
@@ -24,7 +28,7 @@ export async function GET(request: Request) {
     ORDER BY p.created_at DESC LIMIT 500`).all();
   const announcementHistory = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText, action, active,
     editor_name AS editorName, created_at AS createdAt FROM event_announcement_history ORDER BY created_at DESC LIMIT 100`).all();
-  return Response.json({ config, participants: [...participants.results, ...anonymous.results], announcementHistory: announcementHistory.results });
+  return Response.json({ config, participants: [...participants.results, ...anonymous.results], announcementHistory: announcementHistory.results, publishedAnnouncements: publishedAnnouncements.results });
 }
 
 export async function PUT(request: Request) {
