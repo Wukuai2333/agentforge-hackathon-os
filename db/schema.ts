@@ -250,6 +250,9 @@ export const eventConfiguration = sqliteTable("event_configuration", {
   endsAt: integer("ends_at", { mode: "timestamp" }),
   timezone: text("timezone").notNull().default("America/New_York"),
   discordUrl: text("discord_url"),
+  announcementText: text("announcement_text"),
+  announcementActive: integer("announcement_active", { mode: "boolean" }).notNull().default(false),
+  announcementUpdatedAt: integer("announcement_updated_at", { mode: "timestamp" }),
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });

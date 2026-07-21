@@ -38,7 +38,7 @@ function Icon({ children }: { children: React.ReactNode }) {
   return <span className="nav-icon" aria-hidden="true">{children}</span>;
 }
 
-type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; registrationOpen?: number | boolean; updatedAt?: number };
+type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
 
 function LiveEvent({ config }: { config: EventConfig | null }) {
   const [now, setNow] = useState(0);
@@ -97,7 +97,7 @@ export function HackathonPortal() {
     return () => window.removeEventListener("agentforge-assistant-working", updateWorking);
   }, []);
 
-  useEffect(() => { const timer = window.setTimeout(async () => { try { const response = await fetch("/api/event"); const result = await response.json() as { config?: EventConfig }; if (response.ok) setEventConfig(result.config || null); } catch { /* countdown keeps its honest unavailable state */ } }, 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig }; if (response.ok) setEventConfig(result.config || null); } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
@@ -152,6 +152,7 @@ export function HackathonPortal() {
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
           <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={openAssistant}>✦ Ask AI</button></div>
         </header>
+        {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small></div>}
 
         <section className="content">
           {view === "home" && <Overview progress={progress} setView={setView} />}
@@ -427,7 +428,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   const [accessCode, setAccessCode] = useState("");
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
+  const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", announcementText: config?.announcementText || "", announcementActive: config?.announcementActive === true || config?.announcementActive === 1, registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -438,14 +439,14 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
     const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; error?: string };
     if (!response.ok) { setError(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Event management could not be loaded."); return; }
     setAccessCode(candidate); setCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setParticipants(result.participants || []);
-    if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
+    if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
   useEffect(() => { const saved = sessionStorage.getItem("agentforge_organizer_code"); if (!saved) return; const timer = window.setTimeout(() => void open(saved), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setSaving(true); setError("");
-    const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, registrationOpen: form.registrationOpen };
+    const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, announcementText: form.announcementText, announcementActive: form.announcementActive, announcementUpdatedAt: Date.now(), registrationOpen: form.registrationOpen };
     try {
       const response = await fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify(next) });
       const result = await response.json() as { error?: string };
@@ -459,7 +460,22 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
 
   const query = search.trim().toLowerCase();
   const filtered = participants.filter((participant) => [participant.displayName, participant.email, participant.role, participant.status, participant.teamName].some((value) => String(value || "").toLowerCase().includes(query)));
-  return <div className="event-management"><div className="live-admin-head"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Event Management</h2><p>Controls the public countdown, Discord destination, registration state, and participant directory.</p></div><span className="pill on-track">Real event data</span></div><div className="event-management-grid"><section className="event-settings-card"><div className="table-title"><div><h3>Schedule & Community</h3><p>Changes update the participant sidebar after saving.</p></div></div><label>EVENT NAME<input value={form.eventName} onChange={(event) => setForm({ ...form, eventName: event.target.value })} /></label><div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div><label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label><label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label><label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save event settings"}</button></section><aside className="event-preview-card"><span>PARTICIPANT SIDEBAR PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} /><p>The countdown is calculated in each participant’s browser from the same saved timestamps. No AI or tokens are used.</p></aside></div><section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} records · authenticated registrations and current prototype participants</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="participant-table"><div className="participant-row heading"><span>NAME</span><span>EMAIL</span><span>ROLE</span><span>TEAM</span><span>STATUS</span><span>JOINED</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><strong>{participant.displayName}</strong><span>{participant.email || "Not collected"}</span><span>{participant.role}</span><span>{participant.teamName || "Unassigned"}</span><span className={`pill ${participant.status === "active" ? "on-track" : "needs-help"}`}>{participant.status}</span><span>{new Date(participant.joinedAt).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section></div>;
+  return <div className="event-management">
+    <div className="live-admin-head"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Event Management</h2><p>Controls the public countdown, announcements, Discord destination, registration state, and participant directory.</p></div><span className="pill on-track">Real event data</span></div>
+    <div className="event-management-grid">
+      <section className="event-settings-card"><div className="table-title"><div><h3>Schedule & Community</h3><p>Changes update participant pages after saving.</p></div></div>
+        <label>EVENT NAME<input value={form.eventName} onChange={(event) => setForm({ ...form, eventName: event.target.value })} /></label>
+        <div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div>
+        <label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
+        <label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label>
+        <div className="announcement-editor"><span>WEBSITE ANNOUNCEMENT</span><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small></div>
+        <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>
+        {error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : form.announcementActive ? "Save & publish" : "Save event settings"}</button>
+      </section>
+      <aside className="event-preview-card"><span>PARTICIPANT PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} />{form.announcementActive && form.announcementText && <div className="announcement-preview"><b>EVENT ANNOUNCEMENT</b><p>{form.announcementText}</p></div>}<p>The countdown and announcement use saved event data. No AI or tokens are used.</p></aside>
+    </div>
+    <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} records · authenticated registrations and current prototype participants</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="participant-table"><div className="participant-row heading"><span>NAME</span><span>EMAIL</span><span>ROLE</span><span>TEAM</span><span>STATUS</span><span>JOINED</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><strong>{participant.displayName}</strong><span>{participant.email || "Not collected"}</span><span>{participant.role}</span><span>{participant.teamName || "Unassigned"}</span><span className={`pill ${participant.status === "active" ? "on-track" : "needs-help"}`}>{participant.status}</span><span>{new Date(participant.joinedAt).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
+  </div>;
 }
 
 function Admin() {
