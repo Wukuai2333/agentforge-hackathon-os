@@ -29,7 +29,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { action?: "detect" | "sync" | "analyze"; signalId?: string };
+  const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed"; signalId?: string };
+
+  if (input.action === "retry_failed") {
+    const result = await runtime.DB.prepare("UPDATE cognee_sync_outbox SET status='pending',attempts=0,last_error=NULL WHERE status='error' AND attempts>=5").run();
+    return Response.json({ reset: result.meta.changes || 0 });
+  }
 
   if (input.action === "detect") {
     const end = Date.now(), start = end - 3600000;
@@ -65,7 +70,8 @@ export async function POST(request: Request) {
       const form = new FormData();
       const jsonl = pending.results.map((row) => String(row.payloadJson)).join("\n");
       form.set("datasetName", dataset);
-      form.append("data", new Blob([jsonl], { type: "application/x-ndjson" }), `agentforge-events-${Date.now()}.jsonl`);
+      const filename = `agentforge-events-${Date.now()}.jsonl`;
+      form.append("data", new File([jsonl], filename, { type: "application/x-ndjson" }));
       form.append("node_set", "hackathon_prompt_events");
       const added = await fetch(`${base(runtime)}/api/v1/add`, { method: "POST", headers: headers(runtime), body: form });
       if (!added.ok) throw new Error(`Cognee add failed: ${await failure(added)}`);
