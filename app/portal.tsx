@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "settings";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "eventAdmin" | "settings";
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
@@ -38,6 +38,19 @@ function Icon({ children }: { children: React.ReactNode }) {
   return <span className="nav-icon" aria-hidden="true">{children}</span>;
 }
 
+type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; registrationOpen?: number | boolean; updatedAt?: number };
+
+function LiveEvent({ config }: { config: EventConfig | null }) {
+  const [now, setNow] = useState(0);
+  useEffect(() => { const tick = () => setNow(Date.now()); const initial = window.setTimeout(tick, 0); const interval = window.setInterval(tick, 1000); return () => { window.clearTimeout(initial); window.clearInterval(interval); }; }, []);
+  const start = Number(config?.startsAt || 0), end = Number(config?.endsAt || 0);
+  const target = now < start ? start : end;
+  const remaining = Math.max(0, target - now);
+  const hours = Math.floor(remaining / 3600000), minutes = Math.floor((remaining % 3600000) / 60000), seconds = Math.floor((remaining % 60000) / 1000);
+  const label = !start || !end ? "SCHEDULE PENDING" : now < start ? "STARTS IN" : now < end ? "LIVE EVENT" : "EVENT ENDED";
+  return <><div className={`event-chip live-countdown ${now >= start && now < end ? "is-live" : ""}`}><span className="live-dot" /> {label}<b>{start && end ? now >= end ? "Complete" : `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s` : "Set time"}</b></div>{config?.discordUrl && <a className="discord-link" href={config.discordUrl} target="_blank" rel="noreferrer">Join Discord ↗</a>}</>;
+}
+
 export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
   const [done, setDone] = useState<number[]>([0, 1, 2]);
@@ -52,6 +65,7 @@ export function HackathonPortal() {
   const [keySaved, setKeySaved] = useState(false);
   const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   const [selectedMilestone, setSelectedMilestone] = useState<number | null>(null);
+  const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const progress = Math.round((done.length / milestones.length) * 100);
   const surveyQuestions = [
     "What recurring problem in your life would you most like an agent to solve?",
@@ -62,7 +76,7 @@ export function HackathonPortal() {
   ];
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "settings"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "eventAdmin", "settings"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const onHashChange = () => { const next = window.location.hash.replace(/^#\/?/, ""); if (validViews.includes(next as View)) setView(next as View); };
@@ -83,9 +97,11 @@ export function HackathonPortal() {
     return () => window.removeEventListener("agentforge-assistant-working", updateWorking);
   }, []);
 
+  useEffect(() => { const timer = window.setTimeout(async () => { try { const response = await fetch("/api/event"); const result = await response.json() as { config?: EventConfig }; if (response.ok) setEventConfig(result.config || null); } catch { /* countdown keeps its honest unavailable state */ } }, 0); return () => window.clearTimeout(timer); }, []);
+
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : view === "eventAdmin" ? "Event Management" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   function toggleMilestone(index: number) {
     setDone((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
@@ -109,7 +125,7 @@ export function HackathonPortal() {
           <span><strong>AgentForge</strong><small>HACKATHON OS</small></span>
         </button>
 
-        <div className="event-chip"><span className="live-dot" /> LIVE EVENT <b>8h 14m</b></div>
+        <LiveEvent config={eventConfig} />
 
         <nav aria-label="Main navigation">
           <p className="nav-label">YOUR HACKATHON</p>
@@ -122,6 +138,7 @@ export function HackathonPortal() {
           <p className="nav-label">TEAM SPACE</p>
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
+          <button className={view === "eventAdmin" ? "nav-item active" : "nav-item"} onClick={() => setView("eventAdmin")}><Icon>◷</Icon>Event Management</button>
         </nav>
 
         <div className="sidebar-bottom">
@@ -148,6 +165,7 @@ export function HackathonPortal() {
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
           {view === "admin" && <Admin />}
+          {view === "eventAdmin" && <EventManagement config={eventConfig} onSaved={setEventConfig} />}
           {view === "settings" && <Settings keySaved={keySaved} setKeySaved={setKeySaved} />}
         </section>
       </main>
@@ -400,6 +418,49 @@ type OrganizerData = {
   participantModel: Array<{ entryKind: string; count: number }>;
   learningSignals: Array<{ id: string; page: string; tutorialStep?: string; promptCount: number; participantCount: number; errorCount: number; negativeFeedbackCount: number; detectionRule: string; cogneeSummary?: string; reviewStatus: string; createdAt: number }>;
 };
+
+type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: string; status: string; joinedAt: number; teamName?: string | null };
+const toLocalInput = (value?: number | null) => value ? new Date(Number(value) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+
+function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
+  const [code, setCode] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
+  const [search, setSearch] = useState("");
+  const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function open(candidate = accessCode) {
+    if (!candidate) return;
+    setError("");
+    const response = await fetch("/api/event", { headers: { "x-organizer-code": candidate } });
+    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; error?: string };
+    if (!response.ok) { setError(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Event management could not be loaded."); return; }
+    setAccessCode(candidate); setCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setParticipants(result.participants || []);
+    if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
+  }
+
+  useEffect(() => { const saved = sessionStorage.getItem("agentforge_organizer_code"); if (!saved) return; const timer = window.setTimeout(() => void open(saved), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    setSaving(true); setError("");
+    const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, registrationOpen: form.registrationOpen };
+    try {
+      const response = await fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify(next) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Event settings could not be saved.");
+      onSaved(next);
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Event settings could not be saved."); }
+    finally { setSaving(false); }
+  }
+
+  if (!accessCode) return <div className="organizer-login"><span className="service-mark purple">◷</span><span className="eyebrow">PROTECTED EVENT MANAGEMENT</span><h2>Manage the live event.</h2><p>Use the same Organizer Access Code as the Prompt & Memory portal.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void open(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void open(code)} disabled={!code}>Open event management</button></div>;
+
+  const query = search.trim().toLowerCase();
+  const filtered = participants.filter((participant) => [participant.displayName, participant.email, participant.role, participant.status, participant.teamName].some((value) => String(value || "").toLowerCase().includes(query)));
+  return <div className="event-management"><div className="live-admin-head"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Event Management</h2><p>Controls the public countdown, Discord destination, registration state, and participant directory.</p></div><span className="pill on-track">Real event data</span></div><div className="event-management-grid"><section className="event-settings-card"><div className="table-title"><div><h3>Schedule & Community</h3><p>Changes update the participant sidebar after saving.</p></div></div><label>EVENT NAME<input value={form.eventName} onChange={(event) => setForm({ ...form, eventName: event.target.value })} /></label><div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div><label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label><label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label><label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save event settings"}</button></section><aside className="event-preview-card"><span>PARTICIPANT SIDEBAR PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} /><p>The countdown is calculated in each participant’s browser from the same saved timestamps. No AI or tokens are used.</p></aside></div><section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} records · authenticated registrations and current prototype participants</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="participant-table"><div className="participant-row heading"><span>NAME</span><span>EMAIL</span><span>ROLE</span><span>TEAM</span><span>STATUS</span><span>JOINED</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><strong>{participant.displayName}</strong><span>{participant.email || "Not collected"}</span><span>{participant.role}</span><span>{participant.teamName || "Unassigned"}</span><span className={`pill ${participant.status === "active" ? "on-track" : "needs-help"}`}>{participant.status}</span><span>{new Date(participant.joinedAt).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section></div>;
+}
 
 function Admin() {
   const [code, setCode] = useState("");

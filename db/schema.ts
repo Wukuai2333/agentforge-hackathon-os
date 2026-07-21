@@ -242,3 +242,14 @@ export const learningSignals = sqliteTable("learning_signals", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 }, (table) => [index("learning_signals_created_idx").on(table.createdAt)]);
+
+export const eventConfiguration = sqliteTable("event_configuration", {
+  id: text("id").primaryKey(),
+  eventName: text("event_name").notNull().default("Personal Agent Hackathon"),
+  startsAt: integer("starts_at", { mode: "timestamp" }),
+  endsAt: integer("ends_at", { mode: "timestamp" }),
+  timezone: text("timezone").notNull().default("America/New_York"),
+  discordUrl: text("discord_url"),
+  registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
