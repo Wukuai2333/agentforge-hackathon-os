@@ -149,7 +149,7 @@ export function HackathonPortal() {
 
       <main className="main">
         <header className="topbar">
-          <div><p>PERSONAL AGENT HACKATHON</p><h1>{title}</h1></div>
+          <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
           <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={openAssistant}>✦ Ask AI</button></div>
         </header>
 
