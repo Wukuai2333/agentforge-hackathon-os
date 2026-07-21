@@ -9,8 +9,10 @@ const failure = async (response: Response) => `${response.status} ${(await respo
 export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const [sync, model, signals] = await Promise.all([
+  const [sync, failures, model, signals] = await Promise.all([
     runtime.DB.prepare("SELECT status, COUNT(*) AS count FROM cognee_sync_outbox GROUP BY status").all(),
+    runtime.DB.prepare(`SELECT source_type AS sourceType, source_id AS sourceId, attempts, last_error AS lastError,
+      created_at AS createdAt FROM cognee_sync_outbox WHERE status='error' ORDER BY created_at DESC LIMIT 10`).all(),
     runtime.DB.prepare("SELECT entry_kind AS entryKind, COUNT(*) AS count FROM participant_model_entries GROUP BY entry_kind").all(),
     runtime.DB.prepare(`SELECT id, page, tutorial_step AS tutorialStep, window_started_at AS windowStartedAt,
       window_ended_at AS windowEndedAt, prompt_count AS promptCount, participant_count AS participantCount,
@@ -18,7 +20,7 @@ export async function GET(request: Request) {
       cognee_summary AS cogneeSummary, suggested_action AS suggestedAction, review_status AS reviewStatus,
       created_at AS createdAt FROM learning_signals ORDER BY created_at DESC LIMIT 20`).all(),
   ]);
-  return Response.json({ connected: Boolean(runtime.COGNEE_API_KEY), dataset: runtime.COGNEE_LEARNING_DATASET || "agentforge_learning_signals", sync: sync.results, participantModel: model.results, signals: signals.results });
+  return Response.json({ connected: Boolean(runtime.COGNEE_API_KEY), dataset: runtime.COGNEE_LEARNING_DATASET || "agentforge_learning_signals", sync: sync.results, failures: failures.results, participantModel: model.results, signals: signals.results });
 }
 
 export async function POST(request: Request) {
