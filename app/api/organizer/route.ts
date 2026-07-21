@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, settings, cogneeSync, participantModel, learningSignals] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -39,8 +39,14 @@ export async function GET(request: Request) {
     runtime.DB.prepare(`SELECT id, anonymous_participant_id AS participantId, anonymous_team_id AS teamId,
       page, tutorial_step AS tutorialStep, user_prompt AS userPrompt, response_text AS responseText,
       model_name AS modelName, latency_ms AS latencyMs, input_tokens AS inputTokens,
-      output_tokens AS outputTokens, status, error_code AS errorCode, created_at AS createdAt
+      output_tokens AS outputTokens, status, error_code AS errorCode, user_feedback AS userFeedback, created_at AS createdAt
       FROM prompt_events ORDER BY created_at DESC LIMIT 100`).all(),
+    runtime.DB.prepare(`SELECT afe.id, afe.prompt_event_id AS promptEventId,
+      afe.anonymous_participant_id AS participantId, afe.anonymous_team_id AS teamId,
+      afe.participant_display_name AS participantDisplayName, afe.feedback, afe.created_at AS createdAt,
+      pe.page, pe.tutorial_step AS tutorialStep, pe.user_prompt AS userPrompt
+      FROM assistant_feedback_events afe JOIN prompt_events pe ON pe.id=afe.prompt_event_id
+      ORDER BY afe.created_at DESC LIMIT 100`).all(),
     runtime.DB.prepare("SELECT assistant_enabled AS assistantEnabled, default_team_token_quota AS defaultTeamTokenQuota FROM organizer_settings WHERE id='global'").first(),
     runtime.DB.prepare("SELECT status, COUNT(*) AS count FROM cognee_sync_outbox GROUP BY status").all(),
     runtime.DB.prepare("SELECT entry_kind AS entryKind, COUNT(*) AS count FROM participant_model_entries GROUP BY entry_kind").all(),
@@ -53,8 +59,10 @@ export async function GET(request: Request) {
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
+  const safeFeedbacks = feedbacks.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) }));
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: settings || { assistantEnabled: 1, defaultTeamTokenQuota: 100000 },
+    feedbacks: safeFeedbacks,
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results });
 }

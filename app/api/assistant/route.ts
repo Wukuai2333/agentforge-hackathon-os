@@ -129,3 +129,24 @@ export async function POST(request: Request) {
     )]);
   }
 }
+
+export async function PATCH(request: Request) {
+  const input = await request.json() as { promptEventId?: string; anonymousParticipantId?: string; anonymousTeamId?: string; participantDisplayName?: string; feedback?: string };
+  const promptEventId = input.promptEventId?.trim().slice(0, 100) || "";
+  const participantId = input.anonymousParticipantId?.trim().slice(0, 100) || "";
+  const teamId = input.anonymousTeamId?.trim().slice(0, 100) || null;
+  const displayName = input.participantDisplayName?.trim().slice(0, 120) || "Prototype participant";
+  const feedback = input.feedback === "helpful" || input.feedback === "not_helpful" ? input.feedback : null;
+  if (!promptEventId || !participantId || !feedback) return Response.json({ error: "Prompt, participant, and valid feedback are required." }, { status: 400 });
+  const runtime = env as unknown as { DB: D1Database };
+  const prompt = await runtime.DB.prepare("SELECT id, anonymous_team_id AS teamId FROM prompt_events WHERE id=? AND anonymous_participant_id=?").bind(promptEventId, participantId).first<{ id: string; teamId: string | null }>();
+  if (!prompt) return Response.json({ error: "This response does not belong to the current participant." }, { status: 404 });
+  const createdAt = Date.now();
+  await runtime.DB.batch([
+    runtime.DB.prepare(`INSERT INTO assistant_feedback_events
+      (id,prompt_event_id,anonymous_participant_id,anonymous_team_id,participant_display_name,feedback,created_at)
+      VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), promptEventId, participantId, prompt.teamId || teamId, displayName, feedback, createdAt),
+    runtime.DB.prepare("UPDATE prompt_events SET user_feedback=? WHERE id=? AND anonymous_participant_id=?").bind(feedback, promptEventId, participantId),
+  ]);
+  return Response.json({ saved: true, feedback, createdAt });
+}

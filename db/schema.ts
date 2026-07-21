@@ -142,6 +142,19 @@ export const promptEvents = sqliteTable("prompt_events", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+export const assistantFeedbackEvents = sqliteTable("assistant_feedback_events", {
+  id: text("id").primaryKey(),
+  promptEventId: text("prompt_event_id").notNull().references(() => promptEvents.id),
+  anonymousParticipantId: text("anonymous_participant_id").notNull(),
+  anonymousTeamId: text("anonymous_team_id"),
+  participantDisplayName: text("participant_display_name").notNull(),
+  feedback: text("feedback", { enum: ["helpful", "not_helpful"] }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("assistant_feedback_prompt_idx").on(table.promptEventId, table.createdAt),
+  index("assistant_feedback_participant_idx").on(table.anonymousParticipantId, table.createdAt),
+]);
+
 export const tutorialVersions = sqliteTable("tutorial_versions", {
   id: text("id").primaryKey(),
   tutorialSlug: text("tutorial_slug").notNull(),
