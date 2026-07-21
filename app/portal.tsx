@@ -115,7 +115,9 @@ export function HackathonPortal() {
   }
 
   return (
-    <div className="app-shell" onMouseUp={() => {
+    <div className="app-shell" onMouseUp={(event) => {
+      if (view === "admin" || view === "eventAdmin") return;
+      if ((event.target as HTMLElement).closest("input, textarea, button, a")) return;
       const selected = typeof window !== "undefined" ? window.getSelection()?.toString().trim() : "";
       if (selected && selected.length > 2) { setAssistantContext(selected); openAssistant(); }
     }}>
@@ -421,12 +423,15 @@ type OrganizerData = {
 };
 
 type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: string; status: string; joinedAt: number; teamName?: string | null };
+type AnnouncementHistoryItem = { id: string; announcementText?: string | null; action: "published" | "updated" | "withdrawn"; active: number | boolean; editorName: string; createdAt: number };
 const toLocalInput = (value?: number | null) => value ? new Date(Number(value) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 
 function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
   const [code, setCode] = useState("");
   const [accessCode, setAccessCode] = useState("");
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
+  const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
+  const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(false);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", announcementText: config?.announcementText || "", announcementActive: config?.announcementActive === true || config?.announcementActive === 1, registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
   const [error, setError] = useState("");
@@ -436,9 +441,9 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
     if (!candidate) return;
     setError("");
     const response = await fetch("/api/event", { headers: { "x-organizer-code": candidate } });
-    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; error?: string };
+    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
     if (!response.ok) { setError(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Event management could not be loaded."); return; }
-    setAccessCode(candidate); setCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setParticipants(result.participants || []);
+    setAccessCode(candidate); setCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setParticipants(result.participants || []); setAnnouncementHistory(result.announcementHistory || []);
     if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
@@ -452,6 +457,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "Event settings could not be saved.");
       onSaved(next);
+      await open(accessCode);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Event settings could not be saved."); }
     finally { setSaving(false); }
   }
@@ -468,7 +474,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
         <div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div>
         <label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
         <label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label>
-        <div className="announcement-editor"><span>WEBSITE ANNOUNCEMENT</span><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small></div>
+        <div className="announcement-editor"><div className="announcement-editor-title"><span>WEBSITE ANNOUNCEMENT</span><button type="button" onClick={() => setShowAnnouncementHistory((visible) => !visible)}>{showAnnouncementHistory ? "Hide history" : `View history (${announcementHistory.length})`}</button></div><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small>{showAnnouncementHistory && <div className="announcement-history">{announcementHistory.length ? announcementHistory.map((item) => <article key={item.id}><header><span className={`pill ${item.active ? "on-track" : "needs-help"}`}>{item.action}</span><small>{new Date(item.createdAt).toLocaleString()} · {item.editorName}</small></header><p>{item.announcementText || "Announcement removed"}</p></article>) : <p className="notes-empty">No announcement changes recorded yet.</p>}</div>}</div>
         <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>
         {error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : form.announcementActive ? "Save & publish" : "Save event settings"}</button>
       </section>

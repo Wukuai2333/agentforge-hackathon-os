@@ -256,3 +256,12 @@ export const eventConfiguration = sqliteTable("event_configuration", {
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
+
+export const eventAnnouncementHistory = sqliteTable("event_announcement_history", {
+  id: text("id").primaryKey(),
+  announcementText: text("announcement_text"),
+  action: text("action", { enum: ["published", "updated", "withdrawn"] }).notNull(),
+  active: integer("active", { mode: "boolean" }).notNull(),
+  editorName: text("editor_name").notNull().default("Organizer"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("event_announcement_history_created_idx").on(table.createdAt)]);

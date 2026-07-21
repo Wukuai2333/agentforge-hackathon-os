@@ -22,7 +22,9 @@ export async function GET(request: Request) {
     FROM participants p LEFT JOIN teams t ON t.id=p.team_id
     WHERE NOT EXISTS (SELECT 1 FROM event_participants ep WHERE ep.id=p.id)
     ORDER BY p.created_at DESC LIMIT 500`).all();
-  return Response.json({ config, participants: [...participants.results, ...anonymous.results] });
+  const announcementHistory = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText, action, active,
+    editor_name AS editorName, created_at AS createdAt FROM event_announcement_history ORDER BY created_at DESC LIMIT 100`).all();
+  return Response.json({ config, participants: [...participants.results, ...anonymous.results], announcementHistory: announcementHistory.results });
 }
 
 export async function PUT(request: Request) {
@@ -36,11 +38,19 @@ export async function PUT(request: Request) {
   const updatedAt = Date.now();
   const announcementText = input.announcementText?.trim().slice(0, 1000) || null;
   const announcementActive = Boolean(input.announcementActive && announcementText);
-  await runtime.DB.prepare(`INSERT INTO event_configuration (id,event_name,starts_at,ends_at,timezone,discord_url,announcement_text,announcement_active,announcement_updated_at,registration_open,updated_at)
+  const previous = await runtime.DB.prepare("SELECT announcement_text AS announcementText, announcement_active AS announcementActive FROM event_configuration WHERE id='primary'").first<{ announcementText: string | null; announcementActive: number }>();
+  const announcementChanged = (previous?.announcementText || null) !== announcementText || Boolean(previous?.announcementActive) !== announcementActive;
+  const statements = [runtime.DB.prepare(`INSERT INTO event_configuration (id,event_name,starts_at,ends_at,timezone,discord_url,announcement_text,announcement_active,announcement_updated_at,registration_open,updated_at)
     VALUES ('primary',?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET event_name=excluded.event_name,starts_at=excluded.starts_at,
     ends_at=excluded.ends_at,timezone=excluded.timezone,discord_url=excluded.discord_url,announcement_text=excluded.announcement_text,
     announcement_active=excluded.announcement_active,announcement_updated_at=excluded.announcement_updated_at,
     registration_open=excluded.registration_open,updated_at=excluded.updated_at`)
-    .bind(input.eventName?.trim().slice(0, 120) || "Personal Agent Hackathon", startsAt, endsAt, input.timezone?.trim().slice(0, 80) || "America/New_York", discordUrl, announcementText, announcementActive ? 1 : 0, updatedAt, input.registrationOpen === false ? 0 : 1, updatedAt).run();
+    .bind(input.eventName?.trim().slice(0, 120) || "Personal Agent Hackathon", startsAt, endsAt, input.timezone?.trim().slice(0, 80) || "America/New_York", discordUrl, announcementText, announcementActive ? 1 : 0, updatedAt, input.registrationOpen === false ? 0 : 1, updatedAt)];
+  if (announcementChanged) {
+    const action = !announcementActive ? "withdrawn" : previous?.announcementActive ? "updated" : "published";
+    statements.push(runtime.DB.prepare(`INSERT INTO event_announcement_history (id,announcement_text,action,active,editor_name,created_at) VALUES (?,?,?,?,?,?)`)
+      .bind(crypto.randomUUID(), announcementText, action, announcementActive ? 1 : 0, "Organizer", updatedAt));
+  }
+  await runtime.DB.batch(statements);
   return Response.json({ saved: true, updatedAt });
 }
