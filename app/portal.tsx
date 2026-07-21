@@ -416,7 +416,7 @@ function Admin() {
     try {
       const response = await fetch("/api/organizer", { headers: { "x-organizer-code": candidate } });
       const result = await response.json() as OrganizerData & { error?: string };
-      if (!response.ok) throw new Error(result.error || "Organizer data could not be loaded.");
+      if (!response.ok) throw new Error(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Organizer data could not be loaded.");
       setAccessCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setData(result);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Organizer access failed."); }
     finally { setLoading(false); }
