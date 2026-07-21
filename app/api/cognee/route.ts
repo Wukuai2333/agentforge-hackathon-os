@@ -3,7 +3,10 @@ import { env } from "cloudflare:workers";
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
 const allowed = (request: Request, runtime: Runtime) => Boolean(runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE);
 const base = (runtime: Runtime) => (runtime.COGNEE_API_URL || "https://api.cognee.ai").replace(/\/$/, "");
-const headers = (runtime: Runtime, json = false) => ({ Authorization: `Bearer ${runtime.COGNEE_API_KEY}`, "X-Api-Key": runtime.COGNEE_API_KEY || "", ...(json ? { "Content-Type": "application/json" } : {}) });
+// Cognee Cloud tenant endpoints authenticate with X-Api-Key only. Sending a
+// self-hosted Bearer header alongside it causes the tenant gateway to reject
+// the otherwise valid request as an invalid header.
+const headers = (runtime: Runtime, json = false) => ({ "X-Api-Key": runtime.COGNEE_API_KEY || "", ...(json ? { "Content-Type": "application/json" } : {}) });
 const failure = async (response: Response) => `${response.status} ${(await response.text()).slice(0, 500)}`;
 
 export async function GET(request: Request) {
