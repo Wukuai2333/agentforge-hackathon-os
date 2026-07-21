@@ -5,6 +5,8 @@ type AssistantInput = {
   page?: string;
   selectedContext?: string;
   anonymousParticipantId?: string;
+  anonymousTeamId?: string;
+  tutorialStep?: string;
 };
 
 type OpenAIResponse = {
@@ -15,6 +17,13 @@ type OpenAIResponse = {
 };
 
 const SYSTEM_PROMPT_VERSION = "agentforge-tutor-v1";
+
+function sanitizeForMemory(value: string) {
+  return value
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[REDACTED API KEY]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[REDACTED EMAIL]")
+    .replace(/(password|api[_ -]?key|secret)\s*[:=]\s*\S+/gi, "$1=[REDACTED]");
+}
 
 export async function GET(request: Request) {
   const participantId = new URL(request.url).searchParams.get("participantId")?.trim();
@@ -47,6 +56,8 @@ export async function POST(request: Request) {
   const page = input.page?.trim().slice(0, 100) || "Unknown page";
   const selectedContext = input.selectedContext?.trim().slice(0, 2000) || "No text selected";
   const participantId = input.anonymousParticipantId?.trim() || crypto.randomUUID();
+  const teamId = input.anonymousTeamId?.trim().slice(0, 100) || null;
+  const tutorialStep = input.tutorialStep?.trim().slice(0, 150) || null;
   const runtime = env as unknown as { DB: D1Database; OPENAI_API_KEY?: string; OPENAI_MODEL?: string };
   const model = runtime.OPENAI_MODEL || "gpt-5-mini";
   const eventId = crypto.randomUUID();
@@ -90,17 +101,31 @@ export async function POST(request: Request) {
     errorCode ||= "assistant_error";
     return Response.json({ error: message, eventId }, { status: 502 });
   } finally {
-    await runtime.DB.prepare(
+    const occurredAt = Date.now();
+    const memoryPayload = JSON.stringify({
+      schema_version: "agentforge.learning-event.v1", event_id: eventId, event_type: "assistant_prompt",
+      participant_id: participantId, team_id: teamId, page, tutorial_step: tutorialStep,
+      question: sanitizeForMemory(prompt), selected_context: sanitizeForMemory(selectedContext),
+      assistant_response: sanitizeForMemory(answer || ""), status, error_code: errorCode,
+      input_tokens: inputTokens, output_tokens: outputTokens,
+      occurred_at: new Date(occurredAt).toISOString(), evidence_type: "observed_fact",
+    });
+    await runtime.DB.batch([runtime.DB.prepare(
       `INSERT INTO prompt_events
-        (id, anonymous_participant_id, page, user_prompt, system_prompt_version,
+        (id, anonymous_participant_id, anonymous_team_id, page, tutorial_step, user_prompt, system_prompt_version,
          context_type, context_reference, agent_name, model_name, response_text,
          latency_ms, input_tokens, output_tokens, status, error_code, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      eventId, participantId, page, prompt, SYSTEM_PROMPT_VERSION,
+      eventId, participantId, teamId, page, tutorialStep, prompt, SYSTEM_PROMPT_VERSION,
       selectedContext === "No text selected" ? "page" : "selected_text", selectedContext,
       "AgentForge Build Assistant", model, answer || null, Date.now() - startedAt,
-      inputTokens, outputTokens, status, errorCode, Date.now(),
-    ).run();
+      inputTokens, outputTokens, status, errorCode, occurredAt,
+    ), runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
+      (id, source_type, source_id, dataset_name, payload_json, status, attempts, created_at)
+      VALUES (?, 'prompt_event', ?, ?, ?, 'pending', 0, ?)
+      ON CONFLICT(source_type, source_id) DO NOTHING`).bind(
+      crypto.randomUUID(), eventId, "agentforge_learning_signals", memoryPayload, occurredAt,
+    )]);
   }
 }

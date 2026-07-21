@@ -171,3 +171,58 @@ export const organizerSettings = sqliteTable("organizer_settings", {
   defaultTeamTokenQuota: integer("default_team_token_quota").notNull().default(100000),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
+
+// Durable delivery queue: operational events remain authoritative in D1 while
+// sanitized semantic records are delivered to Cognee independently.
+export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {
+  id: text("id").primaryKey(),
+  sourceType: text("source_type", { enum: ["prompt_event", "participant_model", "shared_note"] }).notNull(),
+  sourceId: text("source_id").notNull(),
+  datasetName: text("dataset_name").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  status: text("status", { enum: ["pending", "syncing", "synced", "error"] }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  syncedAt: integer("synced_at", { mode: "timestamp" }),
+}, (table) => [
+  uniqueIndex("cognee_sync_source_unique").on(table.sourceType, table.sourceId),
+  index("cognee_sync_status_idx").on(table.status, table.createdAt),
+]);
+
+export const participantModelEntries = sqliteTable("participant_model_entries", {
+  id: text("id").primaryKey(),
+  anonymousParticipantId: text("anonymous_participant_id").notNull(),
+  anonymousTeamId: text("anonymous_team_id"),
+  entryKind: text("entry_kind", { enum: ["fact", "inference", "confirmation"] }).notNull(),
+  category: text("category").notNull(),
+  statement: text("statement").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id"),
+  confidencePercent: integer("confidence_percent"),
+  confirmedByParticipant: integer("confirmed_by_participant", { mode: "boolean" }).notNull().default(false),
+  supersededById: text("superseded_by_id"),
+  observedAt: integer("observed_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("participant_model_participant_idx").on(table.anonymousParticipantId, table.createdAt),
+  index("participant_model_kind_idx").on(table.entryKind),
+]);
+
+export const learningSignals = sqliteTable("learning_signals", {
+  id: text("id").primaryKey(),
+  page: text("page").notNull(),
+  tutorialStep: text("tutorial_step"),
+  windowStartedAt: integer("window_started_at", { mode: "timestamp" }).notNull(),
+  windowEndedAt: integer("window_ended_at", { mode: "timestamp" }).notNull(),
+  promptCount: integer("prompt_count").notNull(),
+  participantCount: integer("participant_count").notNull(),
+  errorCount: integer("error_count").notNull(),
+  negativeFeedbackCount: integer("negative_feedback_count").notNull(),
+  detectionRule: text("detection_rule").notNull(),
+  cogneeSummary: text("cognee_summary"),
+  suggestedAction: text("suggested_action"),
+  reviewStatus: text("review_status", { enum: ["detected", "reviewing", "approved", "rejected"] }).notNull().default("detected"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+}, (table) => [index("learning_signals_created_idx").on(table.createdAt)]);
