@@ -63,7 +63,10 @@ export async function POST(request: Request) {
     await runtime.DB.prepare(`UPDATE cognee_sync_outbox SET status='syncing',attempts=attempts+1 WHERE id IN (${slots})`).bind(...ids).run();
     try {
       const form = new FormData();
-      form.set("datasetName", dataset); form.set("data", pending.results.map((row) => String(row.payloadJson)).join("\n")); form.append("node_set", "hackathon_prompt_events");
+      const jsonl = pending.results.map((row) => String(row.payloadJson)).join("\n");
+      form.set("datasetName", dataset);
+      form.append("data", new Blob([jsonl], { type: "application/x-ndjson" }), `agentforge-events-${Date.now()}.jsonl`);
+      form.append("node_set", "hackathon_prompt_events");
       const added = await fetch(`${base(runtime)}/api/v1/add`, { method: "POST", headers: headers(runtime), body: form });
       if (!added.ok) throw new Error(`Cognee add failed: ${await failure(added)}`);
       const cognified = await fetch(`${base(runtime)}/api/v1/cognify`, { method: "POST", headers: headers(runtime, true), body: JSON.stringify({ datasets: [dataset], run_in_background: true }) });
