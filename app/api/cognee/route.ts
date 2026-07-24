@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       { id: "tutorial-clawmax-v1", tool: "ClawMax", content: "Hackathon tutorial placeholder. Build one useful agent first, define its tools and data boundaries, test one repeatable task, then connect memory and evaluation. Official sponsor tutorial content is waiting for review with the ClawMax tutor team." },
       { id: "tutorial-cognee-v1", tool: "Cognee", content: "Hackathon memory loop: Add or remember data, Cognify to build memory, Search or recall relevant context, collect feedback, then improve the agent and its memory. Verify ingestion, processing status, retrieval evidence, and evaluation cases." },
     ];
-    await runtime.DB.batch(tutorials.map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
+    const results = await runtime.DB.batch(tutorials.map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
       (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
       VALUES (?,'tutorial_content',?,?,?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
       .bind(crypto.randomUUID(), item.id, dataset, JSON.stringify({
@@ -75,7 +75,8 @@ export async function POST(request: Request) {
         tutorial_id: item.id, tool: item.tool, content: item.content, version: "v1",
         evidence_type: "organizer_authored_fact", occurred_at: new Date(now).toISOString(),
       }), now)));
-    return Response.json({ queued: tutorials.length });
+    const queued = results.reduce((total, result) => total + Number(result.meta.changes || 0), 0);
+    return Response.json({ queued, skipped: tutorials.length - queued, examined: tutorials.length, nextStep: queued ? "Sync pending memory to send these tutorial records to Cognee." : "Both tutorial records were already queued or synced." });
   }
 
   if (input.action === "backfill_all") {
@@ -103,13 +104,15 @@ export async function POST(request: Request) {
       ...feedbacks.results.map((row) => ({ sourceType: "feedback_event", sourceId: String(row.id), row: { schema_version: "agentforge.memory.v2", event_type: "assistant_feedback", ...row, evidence_type: "participant_reported_fact" } })),
     ];
     const now = Date.now();
+    let queued = 0;
     for (let offset = 0; offset < rows.length; offset += 100) {
-      await runtime.DB.batch(rows.slice(offset, offset + 100).map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
+      const results = await runtime.DB.batch(rows.slice(offset, offset + 100).map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
         (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
         VALUES (?,?,?,?,?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
         .bind(crypto.randomUUID(), item.sourceType, item.sourceId, dataset, JSON.stringify(item.row), now)));
+      queued += results.reduce((total, result) => total + Number(result.meta.changes || 0), 0);
     }
-    return Response.json({ examined: rows.length, prompts: prompts.results.length, projects: projects.results.length, notes: notes.results.length, feedbacks: feedbacks.results.length });
+    return Response.json({ examined: rows.length, queued, skipped: rows.length - queued, prompts: prompts.results.length, projects: projects.results.length, notes: notes.results.length, feedbacks: feedbacks.results.length, nextStep: queued ? "Sync pending memory to send the newly queued records to Cognee." : "Every examined record was already queued or synced." });
   }
 
   if (input.action === "sync") {
