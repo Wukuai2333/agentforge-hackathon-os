@@ -15,6 +15,11 @@ function maskSensitive(value: string | null) {
     .replace(/(password|api[_ -]?key|secret)\s*[:=]\s*\S+/gi, "$1=[REDACTED]");
 }
 
+function evaluationScore(value: unknown) {
+  const match = String(value || "").match(/(?:\\?"total_score\\?")\s*:\s*(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
 export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
@@ -70,7 +75,10 @@ export async function GET(request: Request) {
     feedbacks: safeFeedbacks,
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
-    promptEvaluations: promptEvaluations.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) })) });
+    promptEvaluations: promptEvaluations.results.map((row) => ({
+      ...row, totalScore: row.totalScore ?? evaluationScore(row.evaluationJson),
+      userPrompt: maskSensitive(String(row.userPrompt || "")),
+    })) });
 }
 
 export async function PATCH(request: Request) {
