@@ -38,11 +38,21 @@ export async function POST(request: Request) {
     createdAt: Date.now(),
     attributionJson: JSON.stringify([{ text: content, editorName: authorName, color: "violet" }]),
   };
-  await env.DB.prepare(
+  await env.DB.batch([env.DB.prepare(
     `INSERT INTO shared_notes
       (id, team_id, author_id, author_name, content, source_type, source_prompt_event_id, attribution_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(note.id, note.teamId, note.authorId, note.authorName, note.content, note.sourceType, note.sourcePromptEventId, note.attributionJson, note.createdAt).run();
+  ).bind(note.id, note.teamId, note.authorId, note.authorName, note.content, note.sourceType, note.sourcePromptEventId, note.attributionJson, note.createdAt),
+  env.DB.prepare(`INSERT INTO cognee_sync_outbox
+    (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
+    VALUES (?,'shared_note',?,'agentforge_learning_signals',?,'pending',0,?)`)
+    .bind(crypto.randomUUID(), note.id, JSON.stringify({
+      schema_version: "agentforge.memory.v2", event_type: "team_shared_note",
+      note_id: note.id, team_id: note.teamId, participant_id: note.authorId,
+      author_name: note.authorName, content: note.content, source_type: note.sourceType,
+      source_prompt_event_id: note.sourcePromptEventId, occurred_at: new Date(note.createdAt).toISOString(),
+      evidence_type: "team_authored_fact",
+    }), note.createdAt)]);
   return Response.json({ note }, { status: 201 });
 }
 
@@ -60,11 +70,21 @@ export async function PATCH(request: Request) {
   try { const parsed = JSON.parse(attributionJson); if (!Array.isArray(parsed)) throw new Error(); }
   catch { attributionJson = JSON.stringify([{ text: content, editorName, color: "violet" }]); }
   const updatedAt = Date.now();
+  const revisionId = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(`UPDATE shared_notes SET content=?,attribution_json=?,updated_by_id=?,updated_by_name=?,updated_at=? WHERE id=? AND team_id=?`)
       .bind(content, attributionJson, editorId, editorName, updatedAt, noteId, teamId),
     env.DB.prepare(`INSERT INTO shared_note_revisions (id,note_id,team_id,editor_id,editor_name,previous_content,next_content,attribution_json,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), noteId, teamId, editorId, editorName, existing.content, content, attributionJson, updatedAt),
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(revisionId, noteId, teamId, editorId, editorName, existing.content, content, attributionJson, updatedAt),
+    env.DB.prepare(`INSERT INTO cognee_sync_outbox
+      (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
+      VALUES (?,'shared_note',?,'agentforge_learning_signals',?,'pending',0,?)`)
+      .bind(crypto.randomUUID(), revisionId, JSON.stringify({
+        schema_version: "agentforge.memory.v2", event_type: "team_shared_note_revision",
+        note_id: noteId, revision_id: revisionId, team_id: teamId, participant_id: editorId,
+        editor_name: editorName, previous_content: existing.content, content,
+        occurred_at: new Date(updatedAt).toISOString(), evidence_type: "team_authored_fact",
+      }), updatedAt),
   ]);
   return Response.json({ note: { id: noteId, teamId, content, attributionJson, updatedById: editorId, updatedByName: editorName, updatedAt } });
 }

@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed"; signalId?: string };
+  const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed" | "seed_tutorials" | "grade_prompts"; signalId?: string };
 
   if (input.action === "retry_failed") {
     const result = await runtime.DB.prepare("UPDATE cognee_sync_outbox SET status='pending',attempts=0,last_error=NULL WHERE status='error' AND attempts>=5").run();
@@ -61,20 +61,42 @@ export async function POST(request: Request) {
   if (!runtime.COGNEE_API_KEY) return Response.json({ error: "COGNEE_API_KEY is not configured." }, { status: 503 });
   const dataset = runtime.COGNEE_LEARNING_DATASET || "agentforge_learning_signals";
 
+  if (input.action === "seed_tutorials") {
+    const now = Date.now();
+    const tutorials = [
+      { id: "tutorial-clawmax-v1", tool: "ClawMax", content: "Hackathon tutorial placeholder. Build one useful agent first, define its tools and data boundaries, test one repeatable task, then connect memory and evaluation. Official sponsor tutorial content is waiting for review with the ClawMax tutor team." },
+      { id: "tutorial-cognee-v1", tool: "Cognee", content: "Hackathon memory loop: Add or remember data, Cognify to build memory, Search or recall relevant context, collect feedback, then improve the agent and its memory. Verify ingestion, processing status, retrieval evidence, and evaluation cases." },
+    ];
+    await runtime.DB.batch(tutorials.map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
+      (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
+      VALUES (?,'tutorial_content',?,?,?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
+      .bind(crypto.randomUUID(), item.id, dataset, JSON.stringify({
+        schema_version: "agentforge.memory.v2", event_type: "tutorial_content",
+        tutorial_id: item.id, tool: item.tool, content: item.content, version: "v1",
+        evidence_type: "organizer_authored_fact", occurred_at: new Date(now).toISOString(),
+      }), now)));
+    return Response.json({ queued: tutorials.length });
+  }
+
   if (input.action === "sync") {
-    const pending = await runtime.DB.prepare("SELECT id, payload_json AS payloadJson FROM cognee_sync_outbox WHERE status IN ('pending','error') AND attempts<5 ORDER BY created_at LIMIT 50").all();
+    const pending = await runtime.DB.prepare("SELECT id, source_type AS sourceType, payload_json AS payloadJson FROM cognee_sync_outbox WHERE status IN ('pending','error') AND attempts<5 ORDER BY created_at LIMIT 100").all();
     if (!pending.results.length) return Response.json({ synced: 0, message: "No pending records." });
     const ids = pending.results.map((row) => String(row.id)), slots = ids.map(() => "?").join(",");
     await runtime.DB.prepare(`UPDATE cognee_sync_outbox SET status='syncing',attempts=attempts+1 WHERE id IN (${slots})`).bind(...ids).run();
     try {
-      const form = new FormData();
-      const jsonl = pending.results.map((row) => String(row.payloadJson)).join("\n");
-      form.set("datasetName", dataset);
-      const filename = `agentforge-events-${Date.now()}.jsonl`;
-      form.append("data", new File([jsonl], filename, { type: "application/x-ndjson" }));
-      form.append("node_set", "hackathon_prompt_events");
-      const added = await fetch(`${base(runtime)}/api/v1/add`, { method: "POST", headers: headers(runtime), body: form });
-      if (!added.ok) throw new Error(`Cognee add failed: ${await failure(added)}`);
+      const groups = new Map<string, typeof pending.results>();
+      for (const row of pending.results) {
+        const key = String(row.sourceType || "memory_event");
+        groups.set(key, [...(groups.get(key) || []), row]);
+      }
+      for (const [sourceType, rows] of groups) {
+        const form = new FormData();
+        form.set("datasetName", dataset);
+        form.append("data", new File([rows.map((row) => String(row.payloadJson)).join("\n")], `agentforge-${sourceType}-${Date.now()}.jsonl`, { type: "application/x-ndjson" }));
+        form.append("node_set", `hackathon_${sourceType}s`);
+        const added = await fetch(`${base(runtime)}/api/v1/add`, { method: "POST", headers: headers(runtime), body: form });
+        if (!added.ok) throw new Error(`Cognee add failed for ${sourceType}: ${await failure(added)}`);
+      }
       const cognified = await fetch(`${base(runtime)}/api/v1/cognify`, { method: "POST", headers: headers(runtime, true), body: JSON.stringify({ datasets: [dataset], run_in_background: true }) });
       if (!cognified.ok) throw new Error(`Cognee cognify failed: ${await failure(cognified)}`);
       await runtime.DB.prepare(`UPDATE cognee_sync_outbox SET status='synced',synced_at=?,last_error=NULL WHERE id IN (${slots})`).bind(Date.now(), ...ids).run();
@@ -84,6 +106,36 @@ export async function POST(request: Request) {
       await runtime.DB.prepare(`UPDATE cognee_sync_outbox SET status='error',last_error=? WHERE id IN (${slots})`).bind(message.slice(0, 1000), ...ids).run();
       return Response.json({ error: message }, { status: 502 });
     }
+  }
+
+  if (input.action === "grade_prompts") {
+    const rubricVersion = "agentforge-prompt-quality-v1";
+    const prompts = await runtime.DB.prepare(`SELECT pe.id,pe.anonymous_participant_id AS participantId,
+      pe.anonymous_team_id AS teamId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
+      pe.context_reference AS contextReference,pe.response_text AS responseText,pe.user_feedback AS userFeedback
+      FROM prompt_events pe LEFT JOIN prompt_evaluations ev ON ev.prompt_event_id=pe.id AND ev.rubric_version=?
+      WHERE pe.status='success' AND ev.id IS NULL ORDER BY pe.created_at DESC LIMIT 20`).bind(rubricVersion).all();
+    let graded = 0;
+    for (const row of prompts.results) {
+      const query = `Evaluate this hackathon participant prompt using rubric ${rubricVersion}.
+Return JSON only with integer scores 0-4 for clarity, specificity, relevant_context, actionability, iteration_readiness, and safety; total_score 0-24; grade A/B/C/D; strengths; weaknesses; and one improved_prompt.
+Use Cognee memory about the participant and project when relevant. Do not reward verbosity. Do not invent facts.
+Prompt event: ${JSON.stringify(row)}`;
+      const response = await fetch(`${base(runtime)}/api/v1/search`, { method: "POST", headers: headers(runtime, true), body: JSON.stringify({
+        search_type: "AGENTIC_COMPLETION", datasets: [dataset], query, top_k: 10,
+        system_prompt: "You are a prompt-quality evaluator. Distinguish observed evidence from inference and return JSON only.", max_iter: 4,
+      }) });
+      if (!response.ok) continue;
+      const result = await response.json();
+      const raw = JSON.stringify(result).slice(0, 20000);
+      const totalMatch = raw.match(/"total_score"\s*:\s*(\d+)/);
+      await runtime.DB.prepare(`INSERT INTO prompt_evaluations
+        (id,prompt_event_id,rubric_version,evaluator,evaluation_json,total_score,created_at)
+        VALUES (?,?,?,?,?,?,?) ON CONFLICT(prompt_event_id,rubric_version) DO NOTHING`)
+        .bind(crypto.randomUUID(), String(row.id), rubricVersion, "cognee-agentic-completion", raw, totalMatch ? Number(totalMatch[1]) : null, Date.now()).run();
+      graded++;
+    }
+    return Response.json({ graded, evaluated: prompts.results.length, rubricVersion });
   }
 
   if (input.action === "analyze" && input.signalId) {

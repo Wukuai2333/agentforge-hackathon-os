@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -56,6 +56,11 @@ export async function GET(request: Request) {
       cognee_summary AS cogneeSummary, suggested_action AS suggestedAction,
       review_status AS reviewStatus, created_at AS createdAt
       FROM learning_signals ORDER BY created_at DESC LIMIT 20`).all(),
+    runtime.DB.prepare(`SELECT ev.id,ev.prompt_event_id AS promptEventId,ev.rubric_version AS rubricVersion,
+      ev.evaluator,ev.evaluation_json AS evaluationJson,ev.total_score AS totalScore,ev.created_at AS createdAt,
+      pe.anonymous_participant_id AS participantId,pe.page,pe.user_prompt AS userPrompt
+      FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
+      ORDER BY ev.created_at DESC LIMIT 100`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
@@ -64,7 +69,8 @@ export async function GET(request: Request) {
     prompts: safeRecent, settings: settings || { assistantEnabled: 1, defaultTeamTokenQuota: 100000 },
     feedbacks: safeFeedbacks,
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
-    participantModel: participantModel.results, learningSignals: learningSignals.results });
+    participantModel: participantModel.results, learningSignals: learningSignals.results,
+    promptEvaluations: promptEvaluations.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) })) });
 }
 
 export async function PATCH(request: Request) {

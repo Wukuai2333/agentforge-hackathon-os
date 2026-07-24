@@ -205,7 +205,7 @@ export const organizerSettings = sqliteTable("organizer_settings", {
 // sanitized semantic records are delivered to Cognee independently.
 export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {
   id: text("id").primaryKey(),
-  sourceType: text("source_type", { enum: ["prompt_event", "participant_model", "shared_note"] }).notNull(),
+  sourceType: text("source_type", { enum: ["prompt_event", "participant_model", "agent_project", "shared_note", "feedback_event", "progress_event", "tutorial_content"] }).notNull(),
   sourceId: text("source_id").notNull(),
   datasetName: text("dataset_name").notNull(),
   payloadJson: text("payload_json").notNull(),
@@ -217,6 +217,19 @@ export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {
 }, (table) => [
   uniqueIndex("cognee_sync_source_unique").on(table.sourceType, table.sourceId),
   index("cognee_sync_status_idx").on(table.status, table.createdAt),
+]);
+
+export const promptEvaluations = sqliteTable("prompt_evaluations", {
+  id: text("id").primaryKey(),
+  promptEventId: text("prompt_event_id").notNull().references(() => promptEvents.id),
+  rubricVersion: text("rubric_version").notNull(),
+  evaluator: text("evaluator").notNull(),
+  evaluationJson: text("evaluation_json").notNull(),
+  totalScore: integer("total_score"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("prompt_evaluations_prompt_rubric_unique").on(table.promptEventId, table.rubricVersion),
+  index("prompt_evaluations_created_idx").on(table.createdAt),
 ]);
 
 export const participantModelEntries = sqliteTable("participant_model_entries", {
