@@ -148,7 +148,7 @@ export async function POST(request: Request) {
       pe.anonymous_team_id AS teamId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
       pe.context_reference AS contextReference,pe.response_text AS responseText,pe.user_feedback AS userFeedback
       FROM prompt_events pe LEFT JOIN prompt_evaluations ev ON ev.prompt_event_id=pe.id AND ev.rubric_version=?
-      WHERE pe.status='success' AND ev.id IS NULL ORDER BY pe.created_at DESC LIMIT 20`).bind(rubricVersion).all();
+      WHERE pe.status='success' AND ev.id IS NULL ORDER BY pe.created_at DESC LIMIT 1`).bind(rubricVersion).all();
     let graded = 0;
     for (const row of prompts.results) {
       const query = `Evaluate this hackathon participant prompt using rubric ${rubricVersion}.
@@ -156,8 +156,8 @@ Return JSON only with integer scores 0-4 for clarity, specificity, relevant_cont
 Use Cognee memory about the participant and project when relevant. Do not reward verbosity. Do not invent facts.
 Prompt event: ${JSON.stringify(row)}`;
       const response = await fetch(`${base(runtime)}/api/v1/search`, { method: "POST", headers: headers(runtime, true), body: JSON.stringify({
-        search_type: "AGENTIC_COMPLETION", datasets: [dataset], query, top_k: 10,
-        system_prompt: "You are a prompt-quality evaluator. Distinguish observed evidence from inference and return JSON only.", max_iter: 4,
+        search_type: "GRAPH_COMPLETION", datasets: [dataset], query, top_k: 8,
+        system_prompt: "You are a prompt-quality evaluator. Distinguish observed evidence from inference and return JSON only.",
       }) });
       if (!response.ok) continue;
       const result = await response.json();
