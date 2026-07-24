@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed" | "seed_tutorials" | "grade_prompts"; signalId?: string };
+  const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed" | "seed_tutorials" | "backfill_all" | "grade_prompts"; signalId?: string };
 
   if (input.action === "retry_failed") {
     const result = await runtime.DB.prepare("UPDATE cognee_sync_outbox SET status='pending',attempts=0,last_error=NULL WHERE status='error' AND attempts>=5").run();
@@ -76,6 +76,40 @@ export async function POST(request: Request) {
         evidence_type: "organizer_authored_fact", occurred_at: new Date(now).toISOString(),
       }), now)));
     return Response.json({ queued: tutorials.length });
+  }
+
+  if (input.action === "backfill_all") {
+    const [prompts, projects, notes, feedbacks] = await Promise.all([
+      runtime.DB.prepare(`SELECT id,anonymous_participant_id AS participantId,anonymous_team_id AS teamId,page,
+        tutorial_step AS tutorialStep,user_prompt AS userPrompt,system_prompt_version AS systemPromptVersion,
+        context_type AS contextType,context_reference AS contextReference,agent_name AS agentName,
+        model_name AS modelName,response_text AS responseText,latency_ms AS latencyMs,input_tokens AS inputTokens,
+        output_tokens AS outputTokens,status,error_code AS errorCode,user_feedback AS userFeedback,created_at AS createdAt
+        FROM prompt_events ORDER BY created_at LIMIT 2000`).all(),
+      runtime.DB.prepare(`SELECT id,anonymous_participant_id AS participantId,team_id AS teamId,title,problem,
+        current_workflow AS currentWorkflow,data_boundaries AS dataBoundaries,success_criteria AS successCriteria,
+        memory_requirements AS memoryRequirements,status,created_at AS createdAt FROM agent_projects ORDER BY created_at LIMIT 1000`).all(),
+      runtime.DB.prepare(`SELECT id,team_id AS teamId,author_id AS authorId,author_name AS authorName,content,
+        source_type AS sourceType,source_prompt_event_id AS sourcePromptEventId,created_at AS createdAt,
+        updated_at AS updatedAt FROM shared_notes ORDER BY created_at LIMIT 2000`).all(),
+      runtime.DB.prepare(`SELECT id,prompt_event_id AS promptEventId,anonymous_participant_id AS participantId,
+        anonymous_team_id AS teamId,participant_display_name AS participantDisplayName,feedback,created_at AS createdAt
+        FROM assistant_feedback_events ORDER BY created_at LIMIT 2000`).all(),
+    ]);
+    const rows = [
+      ...prompts.results.map((row) => ({ sourceType: "prompt_event", sourceId: String(row.id), row: { schema_version: "agentforge.memory.v2", event_type: "assistant_prompt", ...row, evidence_type: "observed_fact" } })),
+      ...projects.results.map((row) => ({ sourceType: "agent_project", sourceId: String(row.id), row: { schema_version: "agentforge.memory.v2", event_type: "agent_project", ...row, evidence_type: "participant_reported_fact" } })),
+      ...notes.results.map((row) => ({ sourceType: "shared_note", sourceId: String(row.id), row: { schema_version: "agentforge.memory.v2", event_type: "team_shared_note", ...row, evidence_type: "team_authored_fact" } })),
+      ...feedbacks.results.map((row) => ({ sourceType: "feedback_event", sourceId: String(row.id), row: { schema_version: "agentforge.memory.v2", event_type: "assistant_feedback", ...row, evidence_type: "participant_reported_fact" } })),
+    ];
+    const now = Date.now();
+    for (let offset = 0; offset < rows.length; offset += 100) {
+      await runtime.DB.batch(rows.slice(offset, offset + 100).map((item) => runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
+        (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
+        VALUES (?,?,?,?,?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
+        .bind(crypto.randomUUID(), item.sourceType, item.sourceId, dataset, JSON.stringify(item.row), now)));
+    }
+    return Response.json({ examined: rows.length, prompts: prompts.results.length, projects: projects.results.length, notes: notes.results.length, feedbacks: feedbacks.results.length });
   }
 
   if (input.action === "sync") {
