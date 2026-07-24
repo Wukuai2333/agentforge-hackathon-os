@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "eventAdmin" | "settings";
+type PortalRole = "participant" | "organizer";
+type EntryStage = "auth" | "consent" | "survey" | "portal";
+type PortalUser = { id: string; displayName: string; email: string; role: PortalRole; provider: "email" | "google-demo" };
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
@@ -38,6 +41,59 @@ function Icon({ children }: { children: React.ReactNode }) {
   return <span className="nav-icon" aria-hidden="true">{children}</span>;
 }
 
+const demoOrganizerEmails = ["organizer@agentforge.demo", "yuxin.ren@nyu.edu"];
+const demoPrivacySections = [
+  ["01 · What enters the event log", "When you ask the assistant, save a canvas, mark progress, leave feedback, or add a Team Brain note, the demo may keep the text, page, tutorial step, timestamp, response, token usage, and a participant/team identifier. Think of it like application telemetry with a learning purpose: enough context to understand where the build succeeded or broke."],
+  ["02 · The compiler is not your therapist", "Please do not paste passwords, API keys, private medical or financial records, confidential employer data, or a roommate's diary into a hackathon prompt. If a value would look alarming in a public Git commit, it should not be entered here either. Secrets belong in server-side environment variables, not prompts, screenshots, shared notes, or demo videos."],
+  ["03 · Why Cognee receives memory", "Consented project facts, prompts, responses, tutorial activity, feedback, and participant-model statements may be synchronized to the event's Cognee dataset. Cognee helps retrieve relevant context and study recurring learning barriers. Raw operational records and AI interpretations remain distinguishable; an AI summary is not treated as a measured fact."],
+  ["04 · Team visibility and the merge-conflict rule", "Items deliberately added to Team Brain can be viewed and edited by teammates. Private drafts should stay outside shared scope. Edit history may identify who changed a note—because collaborative memory without attribution is basically git blame with the useful part removed."],
+  ["05 · Humans stay in the pull request", "Organizers may review prompts, errors, feedback, and learning signals to support participants and improve tutorials. Suggested tutorial changes require human review before publication. The system should never silently turn a model guess into a participant score, disciplinary decision, or final truth."],
+  ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
+];
+
+function EntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (user: PortalUser) => void }) {
+  const [stage, setStage] = useState<Exclude<EntryStage, "portal">>("auth");
+  const [mode, setMode] = useState<"signin" | "register">("register");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [user, setUser] = useState<PortalUser | null>(null);
+  const [consentChecks, setConsentChecks] = useState([false, false, false]);
+  const [surveyStep, setSurveyStep] = useState(0);
+  const [answer, setAnswer] = useState("");
+  const [answers, setAnswers] = useState<string[]>([]);
+  const questions = [
+    "What recurring problem would you most like your agent to solve?",
+    "How do you handle it today, and where does that workflow break?",
+    "What data may the agent use—and what must remain off limits?",
+    "What observable result would prove the agent is useful?",
+    "What should it remember between sessions?",
+    "How should feedback change its next attempt?",
+    "Does it need another agent, tool, or shared team memory?",
+  ];
+
+  function accountFor(candidateEmail: string, candidateName: string, provider: PortalUser["provider"]) {
+    const normalized = candidateEmail.trim().toLowerCase();
+    const stored = JSON.parse(localStorage.getItem("agentforge_demo_accounts") || "[]") as PortalUser[];
+    const existing = stored.find((item) => item.email.toLowerCase() === normalized);
+    const role: PortalRole = existing?.role || (demoOrganizerEmails.includes(normalized) ? "organizer" : "participant");
+    const next = existing || { id: crypto.randomUUID(), displayName: candidateName.trim() || normalized.split("@")[0], email: normalized, role, provider };
+    if (!existing) localStorage.setItem("agentforge_demo_accounts", JSON.stringify([...stored, next]));
+    sessionStorage.setItem("agentforge_participant_id", next.id);
+    sessionStorage.setItem("agentforge_participant_name", next.displayName);
+    setUser(next);
+    if (next.role === "organizer") onComplete(next);
+    else setStage("consent");
+  }
+
+  if (stage === "auth") return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Create your event identity first. Participants continue through privacy consent and a guided project survey; organizer accounts open the control room.</p><div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Consent</span><i>→</i><span><b>3</b>Project survey</span><i>→</i><span><b>4</b>Build</span></div><small>Authentication screens are demo-ready. Production Google OAuth and password security require the final identity provider configuration.</small></section><section className="auth-card"><span className="eyebrow">{mode === "register" ? "CREATE YOUR ACCOUNT" : "WELCOME BACK"}</span><h2>{mode === "register" ? "Join the hackathon" : "Sign in to continue"}</h2><div className="auth-tabs"><button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Register</button><button className={mode === "signin" ? "active" : ""} onClick={() => setMode("signin")}>Sign in</button></div>{mode === "register" && <label>DISPLAY NAME<input value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}<label>EMAIL<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label>PASSWORD<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8+ characters for the future real auth" /></label><button className="primary auth-submit" disabled={!email.trim() || !password.trim() || (mode === "register" && !name.trim())} onClick={() => accountFor(email, name, "email")}>{mode === "register" ? "Create account & continue" : "Sign in"} →</button><div className="auth-divider"><span>OR</span></div><button className="google-button" onClick={() => accountFor(email || "participant.google@example.com", name || "Google Participant", "google-demo")}><b>G</b> Continue with Google <small>Demo</small></button><button className="demo-organizer-login" onClick={() => accountFor("organizer@agentforge.demo", "Demo Organizer", "email")}>Preview an Organizer account →</button><p className="auth-disclaimer">Demo note: passwords are not sent or stored yet. Google uses a simulated identity in this build.</p></section></div>;
+
+  if (stage === "consent" && user) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>STEP 2 OF 3 · PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This deliberately detailed, code-themed policy demonstrates the future consent experience. It is not final legal language.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>You must actively confirm each item. The final event will link the exact policy version and consent timestamp to your account.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}<button className="primary" disabled={!consentChecks.every(Boolean)} onClick={() => setStage("survey")}>Agree & start project survey →</button><button className="consent-signout" onClick={() => { setUser(null); setStage("auth"); }}>I do not agree · return to sign in</button><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
+
+  const complete = surveyStep >= questions.length;
+  return <div className="entry-survey"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>DYNAMIC PROJECT DISCOVERY</small></span></div><span>STEP 3 OF 3</span></header><main><section><span className="eyebrow">AGENT-GUIDED ONBOARDING · DEMO</span><h1>{complete ? "Your starting direction is ready." : questions[surveyStep]}</h1>{complete ? <><p>In production, ClawMax will use each answer to choose the next question and generate the initial project brief. This demo uses the agreed question path and preserves your answers locally.</p><div className="survey-summary">{answers.map((item, index) => <article key={`${index}-${item}`}><b>{String(index + 1).padStart(2, "0")}</b><p>{item}</p></article>)}</div><button className="primary" onClick={() => user && onComplete(user)}>Enter Participant Portal →</button></> : <><p>Answer with your real workflow in mind. The future ClawMax agent will dynamically follow up when an answer is unclear or reveals a useful direction.</p><textarea rows={6} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Describe it in your own words…" /><div className="entry-survey-actions"><small>Question {surveyStep + 1} of {questions.length}</small><button className="primary" disabled={!answer.trim()} onClick={() => { setAnswers((items) => [...items, answer.trim()]); setAnswer(""); setSurveyStep((value) => value + 1); }}>Continue →</button></div></>}</section><aside><span>LIVE PROJECT BRIEF</span>{["Project idea", "Problem statement", "Data boundaries", "Success criteria", "Memory role", "Improvement loop", "Agent / Brain needs"].map((item, index) => <div className={index < answers.length ? "filled" : ""} key={item}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item}<small>{index < answers.length ? "Captured from your response" : "Waiting for context"}</small></span></div>)}</aside></main></div>;
+}
+
 type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
 type PublishedAnnouncement = { id: string; announcementText: string; action: "published" | "updated"; createdAt: number };
 
@@ -54,6 +110,8 @@ function LiveEvent({ config }: { config: EventConfig | null }) {
 
 export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
+  const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
+  const [entryReady, setEntryReady] = useState(false);
   const [done, setDone] = useState<number[]>([0, 1, 2]);
   const [assistant, setAssistant] = useState(false);
   const [assistantOpened, setAssistantOpened] = useState(false);
@@ -77,6 +135,17 @@ export function HackathonPortal() {
     "What observable result would prove the agent is useful?",
     "What should the agent remember between sessions?",
   ];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const savedUser = localStorage.getItem("agentforge_portal_user");
+        if (savedUser) setPortalUser(JSON.parse(savedUser) as PortalUser);
+      } catch { localStorage.removeItem("agentforge_portal_user"); }
+      setEntryReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "eventAdmin", "settings"];
@@ -104,7 +173,7 @@ export function HackathonPortal() {
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : view === "eventAdmin" ? "Event Management" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   function toggleMilestone(index: number) {
     setDone((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
@@ -117,6 +186,36 @@ export function HackathonPortal() {
     setSurveyStep((step) => Math.min(step + 1, surveyQuestions.length));
   }
 
+  function enterPortal(user: PortalUser) {
+    localStorage.setItem("agentforge_portal_user", JSON.stringify(user));
+    setPortalUser(user);
+    setView(user.role === "organizer" ? "admin" : "home");
+    window.history.replaceState(null, "", `#/${user.role === "organizer" ? "admin" : "home"}`);
+  }
+
+  function signOut() {
+    localStorage.removeItem("agentforge_portal_user");
+    sessionStorage.removeItem("agentforge_organizer_code");
+    setPortalUser(null);
+    setAssistant(false);
+    setAssistantOpened(false);
+    window.history.replaceState(null, "", window.location.pathname);
+  }
+
+  useEffect(() => {
+    if (!portalUser) return;
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "settings"];
+    const organizerViews: View[] = ["admin", "eventAdmin"];
+    const allowed = portalUser.role === "organizer" ? organizerViews : participantViews;
+    if (!allowed.includes(view)) {
+      const timer = window.setTimeout(() => setView(portalUser.role === "organizer" ? "admin" : "home"), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [portalUser, view]);
+
+  if (!entryReady) return <div className="entry-loading"><span className="brand-mark">A</span><p>Preparing your event…</p></div>;
+  if (!portalUser) return <EntryFlow eventName={eventConfig?.eventName || "Personal Agent Hackathon"} onComplete={enterPortal} />;
+
   return (
     <div className="app-shell" onMouseUp={(event) => {
       if (view === "admin" || view === "eventAdmin") return;
@@ -125,15 +224,15 @@ export function HackathonPortal() {
       if (selected && selected.length > 2) { setAssistantContext(selected); openAssistant(); }
     }}>
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView("home")} aria-label="AgentForge home">
+        <button className="brand" onClick={() => setView(portalUser.role === "organizer" ? "admin" : "home")} aria-label="AgentForge home">
           <span className="brand-mark">A</span>
           <span><strong>AgentForge</strong><small>HACKATHON OS</small></span>
         </button>
 
-        <LiveEvent config={eventConfig} />
+        {portalUser.role === "participant" && <LiveEvent config={eventConfig} />}
 
         <nav aria-label="Main navigation">
-          <p className="nav-label">YOUR HACKATHON</p>
+          {portalUser.role === "participant" ? <><p className="nav-label">YOUR HACKATHON</p>
           {nav.map((item) => (
             <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
@@ -142,20 +241,22 @@ export function HackathonPortal() {
           ))}
           <p className="nav-label">TEAM SPACE</p>
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
+          </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
           <button className={view === "eventAdmin" ? "nav-item active" : "nav-item"} onClick={() => setView("eventAdmin")}><Icon>◷</Icon>Event Management</button>
+          </>}
         </nav>
 
         <div className="sidebar-bottom">
-          <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>
-          <div className="profile"><span className="avatar">YR</span><span><strong>Yuxin Ren</strong><small>Team Synapse</small></span><button aria-label="More profile options">•••</button></div>
+          {portalUser.role === "participant" && <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>}
+          <div className="profile"><span className="avatar">{portalUser.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{portalUser.displayName}</strong><small>{portalUser.role === "organizer" ? "Organizer account" : "Participant · Team pending"}</small></span><button onClick={signOut} title="Sign out" aria-label="Sign out">↪</button></div>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
-          <div className="top-actions"><span className="connection"><i /> Systems connected</span><button className="ask-button" onClick={openAssistant}>✦ Ask AI</button></div>
+          <div className="top-actions"><span className="role-chip">{portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{portalUser.role === "participant" && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
         </header>
         {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
 
