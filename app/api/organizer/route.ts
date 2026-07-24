@@ -16,7 +16,7 @@ function maskSensitive(value: string | null) {
 }
 
 function evaluationScore(value: unknown) {
-  const match = String(value || "").match(/(?:\\?"total_score\\?")\s*:\s*(\d+)/);
+  const match = String(value || "").match(/total_score[^0-9]{0,24}(\d+)/);
   return match ? Number(match[1]) : null;
 }
 

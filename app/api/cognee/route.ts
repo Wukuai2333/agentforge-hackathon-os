@@ -162,7 +162,7 @@ Prompt event: ${JSON.stringify(row)}`;
       if (!response.ok) continue;
       const result = await response.json();
       const raw = JSON.stringify(result).slice(0, 20000);
-      const totalMatch = raw.match(/(?:\\?"total_score\\?")\s*:\s*(\d+)/);
+      const totalMatch = raw.match(/total_score[^0-9]{0,24}(\d+)/);
       await runtime.DB.prepare(`INSERT INTO prompt_evaluations
         (id,prompt_event_id,rubric_version,evaluator,evaluation_json,total_score,created_at)
         VALUES (?,?,?,?,?,?,?) ON CONFLICT(prompt_event_id,rubric_version) DO NOTHING`)
