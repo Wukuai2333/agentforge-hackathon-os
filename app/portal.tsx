@@ -677,7 +677,7 @@ type OrganizerData = {
   cognee: { connected: boolean; sync: Array<{ status: string; count: number }> };
   participantModel: Array<{ entryKind: string; count: number }>;
   learningSignals: Array<{ id: string; page: string; tutorialStep?: string; promptCount: number; participantCount: number; errorCount: number; negativeFeedbackCount: number; detectionRule: string; cogneeSummary?: string; suggestedAction?: string; reviewStatus: string; createdAt: number }>;
-  promptClusters: Array<{ id: string; page: string; tutorialStep?: string; category: string; label: string; promptCount: number; participantCount: number; errorCount: number; examplesJson: string; windowStartedAt: number; windowEndedAt: number; createdAt: number }>;
+  promptClusters: Array<{ id: string; page: string; tutorialStep?: string; category: string; label: string; participantLevel: string; promptCount: number; participantCount: number; errorCount: number; examplesJson: string; windowStartedAt: number; windowEndedAt: number; createdAt: number }>;
   signalEvidence: Array<{ signalId: string; promptEventId: string; userPrompt: string; status: string; errorCode?: string; userFeedback?: string; createdAt: number }>;
   feedbacks: Array<{ id: string; promptEventId: string; participantId: string; teamId?: string | null; participantDisplayName: string; feedback: "helpful" | "not_helpful"; page: string; tutorialStep?: string | null; userPrompt: string; createdAt: number }>;
   promptEvaluations: Array<{ id: string; promptEventId: string; rubricVersion: string; evaluator: string; evaluationJson: string; totalScore?: number | null; createdAt: number; participantId: string; page: string; userPrompt: string }>;

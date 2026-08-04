@@ -51,19 +51,22 @@ export async function POST(request: Request) {
         WHEN lower(user_prompt) LIKE '%clawmax%' OR lower(user_prompt) LIKE '%agent%' THEN 'agent_building'
         WHEN status='error' THEN 'runtime_error'
         ELSE 'general_question' END AS category,
+      CASE WHEN (SELECT COUNT(*) FROM prompt_events history WHERE history.anonymous_participant_id=prompt_events.anonymous_participant_id AND history.created_at<=?) <= 3 THEN 'new'
+           WHEN (SELECT COUNT(*) FROM prompt_events history WHERE history.anonymous_participant_id=prompt_events.anonymous_participant_id AND history.created_at<=?) <= 12 THEN 'active'
+           ELSE 'experienced' END AS participantLevel,
       COUNT(*) AS promptCount,
       COUNT(DISTINCT anonymous_participant_id) AS participantCount, SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
       SUM(CASE WHEN user_feedback='not_helpful' THEN 1 ELSE 0 END) AS negativeFeedbackCount,
       json_group_array(substr(user_prompt,1,240)) AS examplesJson
-      FROM prompt_events WHERE created_at BETWEEN ? AND ? GROUP BY page, tutorial_step, category`).bind(start, end).all();
+      FROM prompt_events WHERE created_at BETWEEN ? AND ? GROUP BY page, tutorial_step, category, participantLevel`).bind(end, end, start, end).all();
     let created = 0, clustersCreated = 0;
     for (const row of groups.results) {
       const prompts = Number(row.promptCount || 0), participants = Number(row.participantCount || 0);
       const errors = Number(row.errorCount || 0), negative = Number(row.negativeFeedbackCount || 0);
       if (prompts >= 2) {
         await runtime.DB.prepare(`INSERT INTO prompt_clusters
-          (id,page,tutorial_step,category,label,prompt_count,participant_count,error_count,examples_json,window_started_at,window_ended_at,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), String(row.page), row.tutorialStep || null, String(row.category), String(row.category).replaceAll("_", " "), prompts, participants, errors, String(row.examplesJson || "[]"), start, end, end).run();
+          (id,page,tutorial_step,category,label,participant_level,prompt_count,participant_count,error_count,examples_json,window_started_at,window_ended_at,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), String(row.page), row.tutorialStep || null, String(row.category), String(row.category).replaceAll("_", " "), String(row.participantLevel), prompts, participants, errors, String(row.examplesJson || "[]"), start, end, end).run();
         clustersCreated++;
       }
       if (!((prompts >= 15 && participants >= 5) || (prompts >= 5 && errors / prompts >= .2) || (prompts >= 5 && negative / prompts >= .25))) continue;

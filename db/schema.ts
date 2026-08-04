@@ -336,6 +336,7 @@ export const promptClusters = sqliteTable("prompt_clusters", {
   tutorialStep: text("tutorial_step"),
   category: text("category").notNull(),
   label: text("label").notNull(),
+  participantLevel: text("participant_level").notNull(),
   promptCount: integer("prompt_count").notNull(),
   participantCount: integer("participant_count").notNull(),
   errorCount: integer("error_count").notNull(),

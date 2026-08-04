@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       pe.anonymous_participant_id AS participantId,pe.page,pe.user_prompt AS userPrompt
       FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
       ORDER BY ev.created_at DESC LIMIT 100`).all(),
-    runtime.DB.prepare(`SELECT id,page,tutorial_step AS tutorialStep,category,label,prompt_count AS promptCount,
+    runtime.DB.prepare(`SELECT id,page,tutorial_step AS tutorialStep,category,label,participant_level AS participantLevel,prompt_count AS promptCount,
       participant_count AS participantCount,error_count AS errorCount,examples_json AS examplesJson,
       window_started_at AS windowStartedAt,window_ended_at AS windowEndedAt,created_at AS createdAt
       FROM prompt_clusters ORDER BY created_at DESC LIMIT 50`).all(),

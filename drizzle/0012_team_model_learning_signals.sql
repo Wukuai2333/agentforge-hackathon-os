@@ -34,6 +34,7 @@ CREATE TABLE `prompt_clusters` (
   `tutorial_step` text,
   `category` text NOT NULL,
   `label` text NOT NULL,
+  `participant_level` text NOT NULL,
   `prompt_count` integer NOT NULL,
   `participant_count` integer NOT NULL,
   `error_count` integer NOT NULL,
