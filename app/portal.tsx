@@ -157,6 +157,8 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   const [view, setView] = useState<View>("home");
   const viewHistoryInitialized = useRef(false);
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
+  const [organizerParticipantMode, setOrganizerParticipantMode] = useState(false);
+  const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [pendingAccount, setPendingAccount] = useState<PortalUser | null>(null);
   const [entryReady, setEntryReady] = useState(!identity);
   const [done, setDone] = useState<number[]>([]);
@@ -200,6 +202,14 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   }, [identity]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setOrganizerParticipantMode(window.sessionStorage.getItem("agentforge_organizer_participant_mode") === "true");
+      setPerspectiveReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "model", "data", "admin", "eventAdmin", "settings"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
@@ -236,8 +246,10 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
 
   useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig; publishedAnnouncements?: PublishedAnnouncement[] }; if (response.ok) { setEventConfig(result.config || null); setPublishedAnnouncements(result.publishedAnnouncements || []); } } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
 
+  const participantSurface = portalUser?.role !== "organizer" || organizerParticipantMode;
+
   useEffect(() => {
-    if (!portalUser || portalUser.role === "organizer") return;
+    if (!portalUser || !participantSurface) return;
     const load = async () => {
       try {
         const response = await fetch("/api/progress");
@@ -249,7 +261,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
       } catch { /* Progress remains interactive during a temporary network failure. */ }
     };
     void load();
-  }, [portalUser]);
+  }, [portalUser, participantSurface]);
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
@@ -274,8 +286,23 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   function enterPortal(user: PortalUser) {
     setPortalUser(user);
     setPendingAccount(null);
+    setOrganizerParticipantMode(false);
+    window.sessionStorage.removeItem("agentforge_organizer_participant_mode");
     setView(user.role === "organizer" ? "admin" : "home");
     window.history.replaceState(null, "", `#/${user.role === "organizer" ? "admin" : "home"}`);
+  }
+
+  function enterParticipantDemo() {
+    window.sessionStorage.setItem("agentforge_organizer_participant_mode", "true");
+    setOrganizerParticipantMode(true);
+    setView("home");
+  }
+
+  function returnToOrganizer() {
+    window.sessionStorage.removeItem("agentforge_organizer_participant_mode");
+    setOrganizerParticipantMode(false);
+    setAssistant(false);
+    setView("admin");
   }
 
   function signOut() {
@@ -284,15 +311,16 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   }
 
   useEffect(() => {
-    if (!portalUser) return;
+    if (!portalUser || !perspectiveReady) return;
     const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "model", "data", "settings"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
-    const allowed = portalUser.role === "organizer" ? organizerViews : participantViews;
+    const showingParticipant = portalUser.role !== "organizer" || organizerParticipantMode;
+    const allowed = showingParticipant ? participantViews : organizerViews;
     if (!allowed.includes(view)) {
-      const timer = window.setTimeout(() => setView(portalUser.role === "organizer" ? "admin" : "home"), 0);
+      const timer = window.setTimeout(() => setView(showingParticipant ? "home" : "admin"), 0);
       return () => window.clearTimeout(timer);
     }
-  }, [portalUser, view]);
+  }, [portalUser, view, organizerParticipantMode, perspectiveReady]);
 
   if (!entryReady) return <div className="entry-loading"><span className="brand-mark">A</span><p>Preparing your event…</p></div>;
   if (!portalUser) return <EntryFlow eventName={eventConfig?.eventName || "Personal Agent Hackathon"} account={pendingAccount} onComplete={enterPortal} />;
@@ -305,15 +333,15 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
       if (selected && selected.length > 2) { setAssistantContext(selected); openAssistant(); }
     }}>
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView(portalUser.role === "organizer" ? "admin" : "home")} aria-label="AgentForge home">
+        <button className="brand" onClick={() => setView(participantSurface ? "home" : "admin")} aria-label="AgentForge home">
           <span className="brand-mark">A</span>
           <span><strong>AgentForge</strong><small>HACKATHON OS</small></span>
         </button>
 
-        {portalUser.role !== "organizer" && <LiveEvent config={eventConfig} />}
+        {participantSurface && <LiveEvent config={eventConfig} />}
 
         <nav aria-label="Main navigation">
-          {portalUser.role !== "organizer" ? <><p className="nav-label">YOUR HACKATHON</p>
+          {participantSurface ? <><p className="nav-label">{portalUser.role === "organizer" ? "PARTICIPANT DEMO" : "YOUR HACKATHON"}</p>
           {nav.map((item) => (
             <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
@@ -324,24 +352,27 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
           <button className={view === "model" ? "nav-item active" : "nav-item"} onClick={() => setView("model")}><Icon>⌬</Icon>Learning Model</button>
           <button className={view === "data" ? "nav-item active" : "nav-item"} onClick={() => setView("data")}><Icon>▦</Icon>My Data</button>
+          {portalUser.role === "organizer" && <><p className="nav-label">DEMO CONTROLS</p><button className="nav-item perspective-switch return" onClick={returnToOrganizer}><Icon>←</Icon>Return to Organizer</button></>}
           </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
           <button className={view === "eventAdmin" ? "nav-item active" : "nav-item"} onClick={() => setView("eventAdmin")}><Icon>◷</Icon>Event Management</button>
+          <button className="nav-item perspective-switch" onClick={enterParticipantDemo}><Icon>▶</Icon>Switch to Participant</button>
           </>}
         </nav>
 
         <div className="sidebar-bottom">
-          {portalUser.role !== "organizer" && <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>}
-          <div className="profile"><span className="avatar">{portalUser.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{portalUser.displayName}</strong><small>{portalUser.role === "organizer" ? "Organizer account" : "Participant · Team pending"}</small></span><button onClick={signOut} title="Sign out" aria-label="Sign out">↪</button></div>
+          {participantSurface && <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>}
+          <div className="profile"><span className="avatar">{portalUser.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{portalUser.displayName}</strong><small>{portalUser.role === "organizer" ? organizerParticipantMode ? "Organizer · Participant demo" : "Organizer account" : "Participant · Team pending"}</small></span><button onClick={signOut} title="Sign out" aria-label="Sign out">↪</button></div>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
-          <div className="top-actions"><span className="role-chip">{portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{portalUser.role !== "organizer" && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
+          <div className="top-actions"><span className={`role-chip ${organizerParticipantMode ? "demo" : ""}`}>{organizerParticipantMode ? "PARTICIPANT DEMO" : portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{organizerParticipantMode && <button className="perspective-return-top" onClick={returnToOrganizer}>Return to Organizer</button>}{participantSurface && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
         </header>
         {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
+        {organizerParticipantMode && <div className="participant-demo-banner"><div><strong>Organizer participant demo</strong><span>You are using your real organizer account inside the participant experience. Create or join a shared demo team to rehearse the live workflow.</span></div><button onClick={returnToOrganizer}>Exit demo mode</button></div>}
 
         <section className="content">
           {view === "home" && <Overview progress={progress} setView={setView} />}

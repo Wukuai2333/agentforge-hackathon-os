@@ -33,6 +33,14 @@ test("keeps internal navigation in browser history", async () => {
   assert.match(portal, /addEventListener\("popstate", restoreFromHistory\)/);
 });
 
+test("lets organizers rehearse the participant workflow without changing their role", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, /Switch to Participant/);
+  assert.match(portal, /Return to Organizer/);
+  assert.match(portal, /agentforge_organizer_participant_mode/);
+  assert.match(portal, /Organizer participant demo/);
+});
+
 test("links authenticated identity to consent, team, project, prompt, progress, and memory", async () => {
   const [account, me, assistant, notes, migration] = await Promise.all([
     source("app/api/account/route.ts"), source("app/api/me/route.ts"), source("app/api/assistant/route.ts"),
