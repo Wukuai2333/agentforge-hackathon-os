@@ -92,3 +92,22 @@ test("coaches Prompts against learning goals, iteration, and recorded outcomes",
   assert.match(schema, /promptCoachingActions/);
   assert.match(migration, /prompt_coaching_actions/);
 });
+
+test("updates a participant-controlled model from evidence-linked Cognee inference", async () => {
+  const [portal, model] = await Promise.all([source("app/portal.tsx"), source("app/api/model/route.ts")]);
+  assert.match(portal, /Update My Model/);
+  assert.match(portal, /Participant initiated/);
+  assert.match(portal, /View .* linked source record/);
+  assert.match(model, /cognee_evidence_synthesis/);
+  assert.match(model, /evidence_source_ids/);
+  assert.match(model, /requires_participant_review/);
+  assert.match(model, /Do not infer intelligence, personality, motivation/);
+});
+
+test("uses Shared Space for team collaboration without renaming Cognee concepts", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, />Shared Space</);
+  assert.match(portal, /Add to shared space/);
+  assert.doesNotMatch(portal, />Shared Brain</);
+  assert.match(portal, /COGNEE SEMANTIC MEMORY/);
+});
