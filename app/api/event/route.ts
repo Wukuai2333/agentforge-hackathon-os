@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
+import { currentAccount, identityFromRequest } from "../../../lib/account";
 
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string };
-const authorized = (request: Request, runtime: Runtime) => Boolean(runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE);
+const authorized = async (request: Request, runtime: Runtime) => {
+  if (runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE) return true;
+  const identity = identityFromRequest(request);
+  return identity ? (await currentAccount(runtime.DB, identity))?.role === "organizer" : false;
+};
 
 export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
@@ -14,7 +19,7 @@ export async function GET(request: Request) {
     action, created_at AS createdAt FROM event_announcement_history
     WHERE active=1 AND announcement_text IS NOT NULL
     ORDER BY created_at DESC LIMIT 100`).all();
-  if (!authorized(request, runtime)) return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
+  if (!await authorized(request, runtime)) return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
   const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role, ep.status,
     ep.joined_at AS joinedAt, t.name AS teamName
     FROM event_participants ep
@@ -33,7 +38,7 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const input = await request.json() as { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string; announcementText?: string; announcementActive?: boolean; registrationOpen?: boolean };
   const startsAt = Number(input.startsAt) || null, endsAt = Number(input.endsAt) || null;
   if (startsAt && endsAt && endsAt <= startsAt) return Response.json({ error: "End time must be after start time." }, { status: 400 });

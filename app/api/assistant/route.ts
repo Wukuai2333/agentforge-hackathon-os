@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { requireCurrentAccount } from "../../../lib/account";
 
 type AssistantInput = {
   prompt?: string;
@@ -27,9 +28,10 @@ function sanitizeForMemory(value: string) {
 }
 
 export async function GET(request: Request) {
-  const participantId = new URL(request.url).searchParams.get("participantId")?.trim();
-  if (!participantId) return Response.json({ error: "Participant id is required." }, { status: 400 });
   const runtime = env as unknown as { DB: D1Database };
+  const auth = await requireCurrentAccount(request, runtime.DB);
+  if (auth.error) return auth.error;
+  const participantId = auth.account!.participantId;
   const result = await runtime.DB.prepare(
     `SELECT id, page, user_prompt AS userPrompt, response_text AS responseText,
             model_name AS modelName, input_tokens AS inputTokens, output_tokens AS outputTokens,
@@ -56,10 +58,12 @@ export async function POST(request: Request) {
   const prompt = input.prompt?.trim().slice(0, 4000) ?? "";
   const page = input.page?.trim().slice(0, 100) || "Unknown page";
   const selectedContext = input.selectedContext?.trim().slice(0, 2000) || "No text selected";
-  const participantId = input.anonymousParticipantId?.trim() || crypto.randomUUID();
-  const teamId = input.anonymousTeamId?.trim().slice(0, 100) || null;
-  const tutorialStep = input.tutorialStep?.trim().slice(0, 150) || null;
   const runtime = env as unknown as AssistantRuntime;
+  const auth = await requireCurrentAccount(request, runtime.DB);
+  if (auth.error) return auth.error;
+  const participantId = auth.account!.participantId;
+  const teamId = auth.account!.teamId;
+  const tutorialStep = input.tutorialStep?.trim().slice(0, 150) || null;
   const model = runtime.OPENAI_MODEL || "gpt-5-mini";
   const eventId = crypto.randomUUID();
 
@@ -153,12 +157,14 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const input = await request.json() as { promptEventId?: string; anonymousParticipantId?: string; anonymousTeamId?: string; participantDisplayName?: string; feedback?: string };
   const promptEventId = input.promptEventId?.trim().slice(0, 100) || "";
-  const participantId = input.anonymousParticipantId?.trim().slice(0, 100) || "";
-  const teamId = input.anonymousTeamId?.trim().slice(0, 100) || null;
-  const displayName = input.participantDisplayName?.trim().slice(0, 120) || "Prototype participant";
-  const feedback = input.feedback === "helpful" || input.feedback === "not_helpful" ? input.feedback : null;
-  if (!promptEventId || !participantId || !feedback) return Response.json({ error: "Prompt, participant, and valid feedback are required." }, { status: 400 });
   const runtime = env as unknown as { DB: D1Database };
+  const auth = await requireCurrentAccount(request, runtime.DB);
+  if (auth.error) return auth.error;
+  const participantId = auth.account!.participantId;
+  const teamId = auth.account!.teamId;
+  const displayName = auth.account!.displayName;
+  const feedback = input.feedback === "helpful" || input.feedback === "not_helpful" ? input.feedback : null;
+  if (!promptEventId || !feedback) return Response.json({ error: "Prompt and valid feedback are required." }, { status: 400 });
   const prompt = await runtime.DB.prepare("SELECT id, anonymous_team_id AS teamId FROM prompt_events WHERE id=? AND anonymous_participant_id=?").bind(promptEventId, participantId).first<{ id: string; teamId: string | null }>();
   if (!prompt) return Response.json({ error: "This response does not belong to the current participant." }, { status: 404 });
   const createdAt = Date.now();

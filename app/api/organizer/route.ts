@@ -1,10 +1,14 @@
 import { env } from "cloudflare:workers";
+import { currentAccount, identityFromRequest } from "../../../lib/account";
 
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string; COGNEE_API_KEY?: string };
 
-function authorized(request: Request, runtime: Runtime) {
+async function authorized(request: Request, runtime: Runtime) {
   const supplied = request.headers.get("x-organizer-code") || "";
-  return Boolean(runtime.ORGANIZER_ACCESS_CODE && supplied === runtime.ORGANIZER_ACCESS_CODE);
+  if (runtime.ORGANIZER_ACCESS_CODE && supplied === runtime.ORGANIZER_ACCESS_CODE) return true;
+  const identity = identityFromRequest(request);
+  if (!identity) return false;
+  return (await currentAccount(runtime.DB, identity))?.role === "organizer";
 }
 
 function maskSensitive(value: string | null) {
@@ -22,7 +26,7 @@ function evaluationScore(value: unknown) {
 
 export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
   const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
@@ -83,7 +87,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const input = await request.json() as { assistantEnabled?: boolean; defaultTeamTokenQuota?: number };
   const enabled = input.assistantEnabled === false ? 0 : 1;
   const quota = Math.max(1000, Math.min(10000000, Number(input.defaultTeamTokenQuota) || 100000));
@@ -95,7 +99,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "Prompt id is required." }, { status: 400 });
   await runtime.DB.prepare("DELETE FROM prompt_events WHERE id = ?").bind(id).run();

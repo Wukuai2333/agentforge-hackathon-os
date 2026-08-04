@@ -32,3 +32,18 @@ test("keeps internal navigation in browser history", async () => {
   assert.match(portal, /addEventListener\("hashchange", restoreFromHistory\)/);
   assert.match(portal, /addEventListener\("popstate", restoreFromHistory\)/);
 });
+
+test("links authenticated identity to consent, team, project, prompt, progress, and memory", async () => {
+  const [account, me, assistant, notes, migration] = await Promise.all([
+    source("app/api/account/route.ts"), source("app/api/me/route.ts"), source("app/api/assistant/route.ts"),
+    source("app/api/team-notes/route.ts"), source("drizzle/0011_identity_consent_progress.sql"),
+  ]);
+  assert.match(account, /app_users/);
+  assert.match(account, /consent_records/);
+  assert.match(account, /team_memberships/);
+  assert.match(assistant, /requireCurrentAccount/);
+  assert.match(notes, /requireCurrentAccount/);
+  assert.match(me, /Content-Disposition/);
+  assert.doesNotMatch(me, /export async function DELETE/);
+  assert.match(migration, /event_progress_events/);
+});

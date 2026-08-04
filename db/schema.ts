@@ -13,9 +13,24 @@ export const hackathonEvents = sqliteTable("hackathon_events", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+export const appUsers = sqliteTable("app_users", {
+  id: text("id").primaryKey(),
+  identityProvider: text("identity_provider").notNull(),
+  identitySubject: text("identity_subject").notNull(),
+  email: text("email").notNull(),
+  displayName: text("display_name").notNull(),
+  role: text("role", { enum: ["participant", "mentor", "organizer"] }).notNull().default("participant"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("app_users_identity_unique").on(table.identityProvider, table.identitySubject),
+  uniqueIndex("app_users_email_unique").on(table.email),
+]);
+
 export const eventParticipants = sqliteTable("event_participants", {
   id: text("id").primaryKey(),
   eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  userId: text("user_id").references(() => appUsers.id),
   identityProvider: text("identity_provider"),
   identitySubject: text("identity_subject"),
   email: text("email"),
@@ -27,7 +42,19 @@ export const eventParticipants = sqliteTable("event_participants", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 }, (table) => [
   uniqueIndex("event_participants_identity_unique").on(table.eventId, table.identityProvider, table.identitySubject),
+  uniqueIndex("event_participants_user_event_unique").on(table.eventId, table.userId),
   index("event_participants_event_idx").on(table.eventId),
+]);
+
+export const consentRecords = sqliteTable("consent_records", {
+  id: text("id").primaryKey(),
+  eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  policyVersion: text("policy_version").notNull(),
+  status: text("status", { enum: ["accepted", "withdrawn"] }).notNull(),
+  choicesJson: text("choices_json").notNull(),
+  recordedAt: integer("recorded_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("consent_records_participant_idx").on(table.eventParticipantId, table.recordedAt),
 ]);
 
 export const teams = sqliteTable("teams", {
@@ -101,6 +128,19 @@ export const progressEvents = sqliteTable("progress_events", {
   source: text("source", { enum: ["manual", "clawmax", "cognee", "organizer"] }).notNull(),
   occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
 });
+
+export const eventProgressEvents = sqliteTable("event_progress_events", {
+  id: text("id").primaryKey(),
+  eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  teamId: text("team_id").references(() => teams.id),
+  milestone: text("milestone").notNull(),
+  status: text("status", { enum: ["started", "completed", "verified"] }).notNull(),
+  source: text("source", { enum: ["manual", "clawmax", "cognee", "organizer"] }).notNull(),
+  occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("event_progress_participant_idx").on(table.eventParticipantId, table.occurredAt),
+  index("event_progress_team_idx").on(table.teamId, table.occurredAt),
+]);
 
 export const agentProjects = sqliteTable("agent_projects", {
   id: text("id").primaryKey(),

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { requireCurrentAccount } from "../../../lib/account";
 
 type NoteInput = {
   teamId?: string;
@@ -12,7 +13,10 @@ type NoteInput = {
 };
 
 export async function GET(request: Request) {
-  const teamId = new URL(request.url).searchParams.get("teamId")?.slice(0, 100) || "team-synapse-demo";
+  const auth = await requireCurrentAccount(request, env.DB);
+  if (auth.error) return auth.error;
+  const teamId = auth.account!.teamId;
+  if (!teamId) return Response.json({ notes: [], teamRequired: true });
   const result = await env.DB.prepare(
     `SELECT id, team_id AS teamId, author_id AS authorId, author_name AS authorName,
             content, source_type AS sourceType, source_prompt_event_id AS sourcePromptEventId,
@@ -25,9 +29,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const input = (await request.json()) as NoteInput;
-  const teamId = input.teamId?.trim().slice(0, 100) || "team-synapse-demo";
-  const authorId = input.authorId?.trim().slice(0, 100) || "anonymous";
-  const authorName = input.authorName?.trim().slice(0, 80) || "Hackathon participant";
+  const auth = await requireCurrentAccount(request, env.DB);
+  if (auth.error) return auth.error;
+  const teamId = auth.account!.teamId;
+  if (!teamId) return Response.json({ error: "Join or create a team before adding shared notes." }, { status: 409 });
+  const authorId = auth.account!.participantId;
+  const authorName = auth.account!.displayName;
   const content = input.content?.trim().slice(0, 8000) || "";
   if (!content) return Response.json({ error: "Note content is required." }, { status: 400 });
 
@@ -59,9 +66,12 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const input = (await request.json()) as NoteInput;
   const noteId = input.noteId?.trim();
-  const teamId = input.teamId?.trim().slice(0, 100) || "team-synapse-demo";
-  const editorId = input.authorId?.trim().slice(0, 100) || "anonymous";
-  const editorName = input.authorName?.trim().slice(0, 80) || "Hackathon participant";
+  const auth = await requireCurrentAccount(request, env.DB);
+  if (auth.error) return auth.error;
+  const teamId = auth.account!.teamId;
+  if (!teamId) return Response.json({ error: "Join or create a team before editing shared notes." }, { status: 409 });
+  const editorId = auth.account!.participantId;
+  const editorName = auth.account!.displayName;
   const content = input.content?.trim().slice(0, 8000) || "";
   if (!noteId || !content) return Response.json({ error: "Note and content are required." }, { status: 400 });
   const existing = await env.DB.prepare("SELECT content FROM shared_notes WHERE id=? AND team_id=?").bind(noteId, teamId).first<{ content: string }>();

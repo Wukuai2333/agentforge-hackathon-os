@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "eventAdmin" | "settings";
-type PortalRole = "participant" | "organizer";
-type EntryStage = "auth" | "consent" | "survey" | "portal";
-type PortalUser = { id: string; displayName: string; email: string; role: PortalRole; provider: "email" | "google-demo" };
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "data" | "admin" | "eventAdmin" | "settings";
+type PortalRole = "participant" | "mentor" | "organizer";
+type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
+type InitialIdentity = { id: string; displayName: string; email: string; fullName: string | null };
+type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
@@ -51,7 +52,8 @@ const demoPrivacySections = [
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
 
-function EntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (user: PortalUser) => void }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyEntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (user: PortalUser) => void }) {
   const [stage, setStage] = useState<Exclude<EntryStage, "portal">>("auth");
   const [mode, setMode] = useState<"signin" | "register">("register");
   const [name, setName] = useState("");
@@ -79,7 +81,7 @@ function EntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (
     const role: PortalRole = existing?.role || (demoOrganizerEmails.includes(normalized) ? "organizer" : "participant");
     const next = existing || { id: crypto.randomUUID(), displayName: candidateName.trim() || normalized.split("@")[0], email: normalized, role, provider };
     if (!existing) localStorage.setItem("agentforge_demo_accounts", JSON.stringify([...stored, next]));
-    sessionStorage.setItem("agentforge_participant_id", next.id);
+    sessionStorage.setItem("agentforge_participant_id", next.id || crypto.randomUUID());
     sessionStorage.setItem("agentforge_participant_name", next.displayName);
     setUser(next);
     if (next.role === "organizer") onComplete(next);
@@ -92,6 +94,49 @@ function EntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (
 
   const complete = surveyStep >= questions.length;
   return <div className="entry-survey"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>DYNAMIC PROJECT DISCOVERY</small></span></div><span>STEP 3 OF 3</span></header><main><section><span className="eyebrow">AGENT-GUIDED ONBOARDING · DEMO</span><h1>{complete ? "Your starting direction is ready." : questions[surveyStep]}</h1>{complete ? <><p>In production, ClawMax will use each answer to choose the next question and generate the initial project brief. This demo uses the agreed question path and preserves your answers locally.</p><div className="survey-summary">{answers.map((item, index) => <article key={`${index}-${item}`}><b>{String(index + 1).padStart(2, "0")}</b><p>{item}</p></article>)}</div><button className="primary" onClick={() => user && onComplete(user)}>Enter Participant Portal →</button></> : <><p>Answer with your real workflow in mind. The future ClawMax agent will dynamically follow up when an answer is unclear or reveals a useful direction.</p><textarea rows={6} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Describe it in your own words…" /><div className="entry-survey-actions"><small>Question {surveyStep + 1} of {questions.length}</small><button className="primary" disabled={!answer.trim()} onClick={() => { setAnswers((items) => [...items, answer.trim()]); setAnswer(""); setSurveyStep((value) => value + 1); }}>Continue →</button></div></>}</section><aside><span>LIVE PROJECT BRIEF</span>{["Project idea", "Problem statement", "Data boundaries", "Success criteria", "Memory role", "Improvement loop", "Agent / Brain needs"].map((item, index) => <div className={index < answers.length ? "filled" : ""} key={item}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item}<small>{index < answers.length ? "Captured from your response" : "Waiting for context"}</small></span></div>)}</aside></main></div>;
+}
+
+function EntryFlow({ eventName, account, onComplete }: { eventName: string; account: PortalUser | null; onComplete: (user: PortalUser) => void }) {
+  const [stage, setStage] = useState<"auth" | "consent" | "team" | "survey">(account ? "consent" : "auth");
+  const [current, setCurrent] = useState(account);
+  const [consentChecks, setConsentChecks] = useState([false, false, false]);
+  const [teamMode, setTeamMode] = useState<"create" | "join">("create");
+  const [teamValue, setTeamValue] = useState("");
+  const [surveyStep, setSurveyStep] = useState(0);
+  const [answer, setAnswer] = useState("");
+  const [answers, setAnswers] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const questions = [
+    "What recurring problem would you most like your agent to solve?",
+    "How do you handle it today, and where does that workflow break?",
+    "What data may the agent use—and what must remain off limits?",
+    "What observable result would prove the agent is useful?",
+    "What should it remember between sessions?",
+    "How should feedback change its next attempt?",
+    "Does it need another agent, tool, or shared team memory?",
+  ];
+
+  async function accountAction(action: string, extra: Record<string, unknown> = {}) {
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+      const result = await response.json() as { account?: PortalUser; error?: string };
+      if (!response.ok || !result.account) throw new Error(result.error || "Your event account could not be updated.");
+      setCurrent(result.account);
+      return result.account;
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Something went wrong."); return null; }
+    finally { setSaving(false); }
+  }
+
+  if (stage === "auth") return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Sign in once, then your consent, team, project, prompts, progress, and memory stay connected to one event identity.</p><div className="entry-flow-map"><span><b>1</b>Sign in</span><i>→</i><span><b>2</b>Consent</span><i>→</i><span><b>3</b>Team</span><i>→</i><span><b>4</b>Survey</span></div><small>The account structure is provider-neutral, so Google or email/password can be added later without migrating participant records.</small></section><section className="auth-card"><span className="eyebrow">EVENT ACCOUNT</span><h2>Sign in to continue</h2><p>Organizer access is assigned server-side. Participants continue through consent and project setup.</p><a className="primary auth-submit auth-link" href="/signin-with-chatgpt?return_to=%2F">Sign in securely →</a><p className="auth-disclaimer">AgentForge does not collect or store a password in this flow.</p></section></div>;
+
+  if (stage === "consent" && current) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This policy demonstrates the consent flow and still requires organizer and legal review.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>The policy version, exact choices, participant registration, and timestamp are stored together.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !consentChecks.every(Boolean)} onClick={async () => { const next = await accountAction("accept_consent", { choices: consentChecks }); if (next) setStage("team"); }}>{saving ? "Saving consent…" : "Agree & choose a team →"}</button><a className="consent-signout" href="/signout-with-chatgpt?return_to=%2F">I do not agree · sign out</a><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
+
+  if (stage === "team" && current) return <div className="entry-survey team-entry"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>TEAM SETUP</small></span></div><span>ONE ACTIVE TEAM PER PERSON</span></header><main><section><span className="eyebrow">TEAM MEMBERSHIP</span><h1>Build with a team—or start solo.</h1><p>Create a team and share its invite code, or join an existing team. You can switch later; earlier membership records and event data remain available through the event.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create team</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join team</button></div><label>{teamMode === "create" ? "TEAM NAME" : "INVITE CODE"}<input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Example: Team Synapse" : "8-character code"} /></label>{error && <p className="entry-error">{error}</p>}<div className="entry-survey-actions"><button className="text-button" onClick={() => setStage("survey")}>Continue solo for now</button><button className="primary" disabled={saving || !teamValue.trim()} onClick={async () => { const next = await accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue }); if (next) setStage("survey"); }}>{saving ? "Saving…" : teamMode === "create" ? "Create team →" : "Join team →"}</button></div></section><aside><span>YOUR EVENT IDENTITY</span><div className="filled"><b>✓</b><span>{current.displayName}<small>{current.email}</small></span></div><div className="filled"><b>✓</b><span>Consent recorded<small>{current.consentVersion}</small></span></div><div><b>3</b><span>Team membership<small>Waiting for your choice</small></span></div></aside></main></div>;
+
+  const complete = surveyStep >= questions.length;
+  return <div className="entry-survey"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>DYNAMIC PROJECT DISCOVERY</small></span></div><span>PROJECT SURVEY</span></header><main><section><span className="eyebrow">AGENT-GUIDED ONBOARDING · DEMO</span><h1>{complete ? "Your starting direction is ready." : questions[surveyStep]}</h1>{complete ? <><p>These responses become your project record and participant-model evidence. ClawMax will eventually choose the follow-up questions dynamically.</p><div className="survey-summary">{answers.map((item, index) => <article key={`${index}-${item}`}><b>{String(index + 1).padStart(2, "0")}</b><p>{item}</p></article>)}</div>{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Project could not be saved."); if (current) onComplete(current); } catch (problem) { setError(problem instanceof Error ? problem.message : "Project could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving project…" : "Enter Participant Portal →"}</button></> : <><p>Answer with your real workflow in mind. The future ClawMax interviewer will follow up when an answer is unclear.</p><textarea rows={6} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Describe it in your own words…" /><div className="entry-survey-actions"><small>Question {surveyStep + 1} of {questions.length}</small><button className="primary" disabled={!answer.trim()} onClick={() => { setAnswers((items) => [...items, answer.trim()]); setAnswer(""); setSurveyStep((value) => value + 1); }}>Continue →</button></div></>}</section><aside><span>LIVE PROJECT BRIEF</span>{["Project idea", "Problem statement", "Data boundaries", "Success criteria", "Memory role", "Improvement loop", "Agent / Brain needs"].map((item, index) => <div className={index < answers.length ? "filled" : ""} key={item}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item}<small>{index < answers.length ? "Captured from your response" : "Waiting for context"}</small></span></div>)}</aside></main></div>;
 }
 
 type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
@@ -108,12 +153,13 @@ function LiveEvent({ config }: { config: EventConfig | null }) {
   return <><div className={`event-chip live-countdown ${now >= start && now < end ? "is-live" : ""}`}><span className="live-dot" /> {label}<b>{start && end ? now >= end ? "Complete" : `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s` : "Set time"}</b></div>{config?.discordUrl && <a className="discord-link" href={config.discordUrl} target="_blank" rel="noreferrer">Join Discord ↗</a>}</>;
 }
 
-export function HackathonPortal() {
+export function HackathonPortal({ identity }: { identity: InitialIdentity | null }) {
   const [view, setView] = useState<View>("home");
   const viewHistoryInitialized = useRef(false);
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
-  const [entryReady, setEntryReady] = useState(false);
-  const [done, setDone] = useState<number[]>([0, 1, 2]);
+  const [pendingAccount, setPendingAccount] = useState<PortalUser | null>(null);
+  const [entryReady, setEntryReady] = useState(!identity);
+  const [done, setDone] = useState<number[]>([]);
   const [assistant, setAssistant] = useState(false);
   const [assistantOpened, setAssistantOpened] = useState(false);
   const [assistantWorking, setAssistantWorking] = useState(false);
@@ -138,18 +184,23 @@ export function HackathonPortal() {
   ];
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    if (!identity) return;
+    let cancelled = false;
+    const bootstrap = async () => {
       try {
-        const savedUser = localStorage.getItem("agentforge_portal_user");
-        if (savedUser) setPortalUser(JSON.parse(savedUser) as PortalUser);
-      } catch { localStorage.removeItem("agentforge_portal_user"); }
-      setEntryReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+        const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bootstrap" }) });
+        const result = await response.json() as { account?: PortalUser };
+        if (!response.ok || !result.account || cancelled) return;
+        if (result.account.role === "organizer" || result.account.consentVersion !== "pending") setPortalUser(result.account);
+        else setPendingAccount(result.account);
+      } finally { if (!cancelled) setEntryReady(true); }
+    };
+    void bootstrap();
+    return () => { cancelled = true; };
+  }, [identity]);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "eventAdmin", "settings"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "data", "admin", "eventAdmin", "settings"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -185,12 +236,32 @@ export function HackathonPortal() {
 
   useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig; publishedAnnouncements?: PublishedAnnouncement[] }; if (response.ok) { setEventConfig(result.config || null); setPublishedAnnouncements(result.publishedAnnouncements || []); } } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
 
+  useEffect(() => {
+    if (!portalUser || portalUser.role === "organizer") return;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/progress");
+        const result = await response.json() as { events?: Array<{ milestone: string; status: string }> };
+        if (!response.ok) return;
+        const latest = new Map<string, string>();
+        for (const event of result.events || []) latest.set(event.milestone, event.status);
+        setDone(milestones.map((item, index) => latest.get(item[0]) === "completed" || latest.get(item[0]) === "verified" ? index : -1).filter((index) => index >= 0));
+      } catch { /* Progress remains interactive during a temporary network failure. */ }
+    };
+    void load();
+  }, [portalUser]);
+
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : view === "data" ? "My Data" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
-  function toggleMilestone(index: number) {
-    setDone((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
+  async function toggleMilestone(index: number) {
+    const completed = !done.includes(index);
+    setDone((current) => completed ? [...current, index] : current.filter((item) => item !== index));
+    try {
+      const response = await fetch("/api/progress", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ milestone: milestones[index][0], status: completed ? "completed" : "started" }) });
+      if (!response.ok) throw new Error();
+    } catch { setDone((current) => completed ? current.filter((item) => item !== index) : [...current, index]); }
   }
 
   function nextSurvey() {
@@ -201,24 +272,20 @@ export function HackathonPortal() {
   }
 
   function enterPortal(user: PortalUser) {
-    localStorage.setItem("agentforge_portal_user", JSON.stringify(user));
     setPortalUser(user);
+    setPendingAccount(null);
     setView(user.role === "organizer" ? "admin" : "home");
     window.history.replaceState(null, "", `#/${user.role === "organizer" ? "admin" : "home"}`);
   }
 
   function signOut() {
-    localStorage.removeItem("agentforge_portal_user");
     sessionStorage.removeItem("agentforge_organizer_code");
-    setPortalUser(null);
-    setAssistant(false);
-    setAssistantOpened(false);
-    window.history.replaceState(null, "", window.location.pathname);
+    window.location.href = "/signout-with-chatgpt?return_to=%2F";
   }
 
   useEffect(() => {
     if (!portalUser) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "settings"];
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "data", "settings"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const allowed = portalUser.role === "organizer" ? organizerViews : participantViews;
     if (!allowed.includes(view)) {
@@ -228,7 +295,7 @@ export function HackathonPortal() {
   }, [portalUser, view]);
 
   if (!entryReady) return <div className="entry-loading"><span className="brand-mark">A</span><p>Preparing your event…</p></div>;
-  if (!portalUser) return <EntryFlow eventName={eventConfig?.eventName || "Personal Agent Hackathon"} onComplete={enterPortal} />;
+  if (!portalUser) return <EntryFlow eventName={eventConfig?.eventName || "Personal Agent Hackathon"} account={pendingAccount} onComplete={enterPortal} />;
 
   return (
     <div className="app-shell" onMouseUp={(event) => {
@@ -243,10 +310,10 @@ export function HackathonPortal() {
           <span><strong>AgentForge</strong><small>HACKATHON OS</small></span>
         </button>
 
-        {portalUser.role === "participant" && <LiveEvent config={eventConfig} />}
+        {portalUser.role !== "organizer" && <LiveEvent config={eventConfig} />}
 
         <nav aria-label="Main navigation">
-          {portalUser.role === "participant" ? <><p className="nav-label">YOUR HACKATHON</p>
+          {portalUser.role !== "organizer" ? <><p className="nav-label">YOUR HACKATHON</p>
           {nav.map((item) => (
             <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
@@ -255,6 +322,7 @@ export function HackathonPortal() {
           ))}
           <p className="nav-label">TEAM SPACE</p>
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
+          <button className={view === "data" ? "nav-item active" : "nav-item"} onClick={() => setView("data")}><Icon>▦</Icon>My Data</button>
           </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
           <button className={view === "eventAdmin" ? "nav-item active" : "nav-item"} onClick={() => setView("eventAdmin")}><Icon>◷</Icon>Event Management</button>
@@ -262,7 +330,7 @@ export function HackathonPortal() {
         </nav>
 
         <div className="sidebar-bottom">
-          {portalUser.role === "participant" && <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>}
+          {portalUser.role !== "organizer" && <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}><Icon>⚙</Icon>Settings</button>}
           <div className="profile"><span className="avatar">{portalUser.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><span><strong>{portalUser.displayName}</strong><small>{portalUser.role === "organizer" ? "Organizer account" : "Participant · Team pending"}</small></span><button onClick={signOut} title="Sign out" aria-label="Sign out">↪</button></div>
         </div>
       </aside>
@@ -270,7 +338,7 @@ export function HackathonPortal() {
       <main className="main">
         <header className="topbar">
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
-          <div className="top-actions"><span className="role-chip">{portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{portalUser.role === "participant" && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
+          <div className="top-actions"><span className="role-chip">{portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{portalUser.role !== "organizer" && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
         </header>
         {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
 
@@ -285,6 +353,7 @@ export function HackathonPortal() {
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
+          {view === "data" && <MyData />}
           {view === "admin" && <Admin />}
           {view === "eventAdmin" && <EventManagement config={eventConfig} onSaved={setEventConfig} />}
           {view === "settings" && <Settings keySaved={keySaved} setKeySaved={setKeySaved} />}
@@ -606,7 +675,7 @@ function PromptEvaluationCard({ item }: { item: OrganizerData["promptEvaluations
 
 function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
   const [code, setCode] = useState("");
-  const [accessCode, setAccessCode] = useState("");
+  const [accessCode, setAccessCode] = useState("account");
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
   const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
   const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(true);
@@ -625,7 +694,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
     if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
-  useEffect(() => { const saved = sessionStorage.getItem("agentforge_organizer_code"); if (!saved) return; const timer = window.setTimeout(() => void open(saved), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const timer = window.setTimeout(() => void open("account"), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setSaving(true); setError("");
@@ -663,8 +732,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
 }
 
 function Admin() {
-  const [code, setCode] = useState("");
-  const [accessCode, setAccessCode] = useState("");
+  const [accessCode, setAccessCode] = useState("account");
   const [data, setData] = useState<OrganizerData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -686,7 +754,7 @@ function Admin() {
 
   // Restore an organizer session once on mount; subsequent refreshes use the explicit controls.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { const saved = sessionStorage.getItem("agentforge_organizer_code"); if (!saved) return; const timer = window.setTimeout(() => { setCode(saved); void loadOrganizer(saved); }, 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void loadOrganizer("account"), 0); return () => window.clearTimeout(timer); }, []);
 
   async function updateSettings(assistantEnabled: boolean, quota = data?.settings.defaultTeamTokenQuota || 100000) {
     const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ assistantEnabled, defaultTeamTokenQuota: quota }) });
@@ -720,7 +788,7 @@ function Admin() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "agentforge-prompt-events.csv"; link.click(); URL.revokeObjectURL(url);
   }
 
-  if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>Open the live control room.</h2><p>Only real prompts, responses, token usage, and participant activity are shown here. Enter the Organizer Access Code stored in the local environment file.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void loadOrganizer(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer(code)} disabled={loading || !code}>{loading ? "Opening…" : "Open organizer portal"}</button></div>;
+  if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>{loading ? "Opening the control room…" : "Organizer access required."}</h2><p>Access is checked from the signed-in account role on the server.</p>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer("account")} disabled={loading}>{loading ? "Loading…" : "Retry"}</button></div>;
 
   const totalTokens = Number(data.summary.inputTokens) + Number(data.summary.outputTokens);
   const quota = Number(data.settings.defaultTeamTokenQuota);
@@ -772,6 +840,29 @@ function _AdminDemo() {
   ].map(([n, title, text]) => <article key={n}><b>{n}</b><h3>{title}</h3><p>{text}</p></article>)}</div>
   <div className="signal-reality-grid"><article><span>ZERO-TOKEN DETECTION</span><h3>Rules find the problem first.</h3><pre>{`IF questions ≥ 15\nAND unique students ≥ 5\nOR error rate ≥ 20%\nOR negative feedback ≥ 25%\n→ create Learning Signal`}</pre><p>Counts, timestamps, error events, milestone activity, and feedback come directly from the database. No model call is required.</p></article><article><span>OPTIONAL AI, ON DEMAND</span><h3>Use AI only for the draft.</h3><p>When an organizer clicks <b>Draft tutorial update</b>, one optional model call can summarize 3–5 anonymized examples and propose a clearer checkpoint. The draft never publishes automatically.</p><div className="human-review">Human review → Edit → Approve → Publish or reject</div></article><article><span>MEASURE THE RESULT</span><h3>Did the tutorial actually improve?</h3><div className="comparison"><div><small>METRIC</small><small>BEFORE</small><small>AFTER</small></div><div><span>Completion rate</span><b>58%</b><strong>81%</strong></div><div><span>Average time</span><b>19 min</b><strong>11 min</strong></div><div><span>Help requests</span><b>38</b><strong>12</strong></div><div><span>Error rate</span><b>24%</b><strong>9%</strong></div></div><p>These demo values show the comparison we would calculate from real participant events after a tutorial version is published.</p></article></div>
   <footer><strong>Recommended MVP</strong><span>Prompt + step tracking → scheduled database aggregation → threshold rules → keyword/error-code categories → human-reviewed template draft → before/after metrics.</span></footer></section></>;
+}
+
+type MyDataPayload = {
+  exportedAt: string;
+  account: PortalUser;
+  relationship: { userId: string; eventRegistrationId: string; eventId: string; teamId: string | null };
+  consent: Array<{ id: string; policyVersion: string; status: string; recordedAt: number }>;
+  projects: Array<{ id: string; title: string; problem: string; successCriteria?: string; status: string; updatedAt: number }>;
+  prompts: Array<{ id: string; page: string; tutorialStep?: string; userPrompt: string; responseText?: string; modelName?: string; inputTokens?: number; outputTokens?: number; status: string; userFeedback?: string; createdAt: number; memoryStatus?: string; memorySyncedAt?: number }>;
+  memory: Array<{ id: string; entryKind: string; category: string; statement: string; sourceType: string; confirmedByParticipant: number; observedAt: number; memoryStatus?: string; memorySyncedAt?: number }>;
+  progress: Array<{ id: string; milestone: string; status: string; source: string; occurredAt: number }>;
+};
+
+function MyData() {
+  const [data, setData] = useState<MyDataPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => { const load = async () => { try { const response = await fetch("/api/me"); const result = await response.json() as MyDataPayload & { error?: string }; if (!response.ok) throw new Error(result.error || "Your data could not be loaded."); setData(result); } catch (problem) { setError(problem instanceof Error ? problem.message : "Your data could not be loaded."); } finally { setLoading(false); } }; void load(); }, []);
+  if (loading) return <div className="my-data-page"><section className="my-data-hero"><span className="eyebrow">YOUR EVENT RECORD</span><h2>Loading your data…</h2></section></div>;
+  if (error || !data) return <div className="my-data-page"><section className="my-data-hero"><span className="eyebrow">YOUR EVENT RECORD</span><h2>We could not load this page.</h2><p>{error}</p></section></div>;
+  const synced = data.prompts.filter((item) => item.memoryStatus === "synced").length + data.memory.filter((item) => item.memoryStatus === "synced").length;
+  const pending = data.prompts.filter((item) => item.memoryStatus === "pending").length + data.memory.filter((item) => item.memoryStatus === "pending").length;
+  return <div className="my-data-page"><section className="my-data-hero"><div><span className="eyebrow">YOUR EVENT RECORD</span><h2>See what AgentForge remembers about your work.</h2><p>This page separates operational Prompt records from participant-model Memory. Cognee delivery status is shown explicitly.</p></div><a className="primary" href="/api/me?download=1" download>Export my data (.json) ↓</a></section><section className="identity-chain"><article><small>USER</small><strong>{data.account.displayName}</strong><span>{data.account.email}</span></article><i>→</i><article><small>EVENT REGISTRATION</small><strong>{data.relationship.eventRegistrationId.slice(0, 8)}…</strong><span>{data.account.role}</span></article><i>→</i><article><small>CONSENT</small><strong>{data.consent[0]?.status || "Not recorded"}</strong><span>{data.consent[0]?.policyVersion || "—"}</span></article><i>→</i><article><small>TEAM</small><strong>{data.account.teamName || "Solo / pending"}</strong><span>{data.account.inviteCode || "No invite code"}</span></article><i>→</i><article><small>PROJECT & EVIDENCE</small><strong>{data.projects.length} project · {data.prompts.length} prompts</strong><span>{synced} synced · {pending} pending</span></article></section><div className="my-data-grid"><section><header><div><span className="eyebrow">RAW OPERATIONAL RECORDS</span><h3>My prompts</h3></div><b>{data.prompts.length}</b></header>{data.prompts.length ? data.prompts.map((item) => <article className="data-record" key={item.id}><div><small>{item.page}{item.tutorialStep ? ` · ${item.tutorialStep}` : ""} · {new Date(item.createdAt).toLocaleString()}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.userPrompt}</strong>{item.responseText && <p>{item.responseText}</p>}<footer><span>{item.status} · {item.modelName || "No model"}</span><span>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output</span></footer></article>) : <p className="notes-empty">No prompts have been recorded for this account yet.</p>}</section><section><header><div><span className="eyebrow">COGNEE-BOUND PARTICIPANT MODEL</span><h3>My memory</h3></div><b>{data.memory.length}</b></header>{data.memory.length ? data.memory.map((item) => <article className="data-record memory-record" key={item.id}><div><small>{item.entryKind.toUpperCase()} · {item.category}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.statement}</strong><footer><span>Source: {item.sourceType}</span><span>{item.confirmedByParticipant ? "Participant-confirmed" : "Not confirmed"}</span></footer></article>) : <p className="notes-empty">No participant-model memory has been recorded yet.</p>}</section></div><section className="data-progress"><header><div><span className="eyebrow">APPEND-ONLY ACTIVITY</span><h3>Progress history</h3></div><b>{data.progress.length}</b></header>{data.progress.slice(0, 20).map((item) => <div key={item.id}><strong>{item.milestone}</strong><span>{item.status} · {item.source}</span><small>{new Date(item.occurredAt).toLocaleString()}</small></div>)}</section><p className="data-retention-note"><strong>Deletion note:</strong> single-record deletion is intentionally not enabled in this phase. The export is live; retention and deletion need a reviewed event policy so shared team evidence and audit history are handled consistently.</p></div>;
 }
 
 function Settings({ keySaved, setKeySaved }: { keySaved: boolean; setKeySaved: (v: boolean) => void }) {

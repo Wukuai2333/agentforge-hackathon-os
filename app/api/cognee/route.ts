@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
+import { currentAccount, identityFromRequest } from "../../../lib/account";
 
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
-const allowed = (request: Request, runtime: Runtime) => Boolean(runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE);
+const allowed = async (request: Request, runtime: Runtime) => {
+  if (runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE) return true;
+  const identity = identityFromRequest(request);
+  return identity ? (await currentAccount(runtime.DB, identity))?.role === "organizer" : false;
+};
 const base = (runtime: Runtime) => (runtime.COGNEE_API_URL || "https://api.cognee.ai").replace(/\/$/, "");
 // Cognee Cloud tenant endpoints authenticate with X-Api-Key only. Sending a
 // self-hosted Bearer header alongside it causes the tenant gateway to reject
@@ -11,7 +16,7 @@ const failure = async (response: Response) => `${response.status} ${(await respo
 
 export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const [sync, failures, model, signals] = await Promise.all([
     runtime.DB.prepare("SELECT status, COUNT(*) AS count FROM cognee_sync_outbox GROUP BY status").all(),
     runtime.DB.prepare(`SELECT source_type AS sourceType, source_id AS sourceId, attempts, last_error AS lastError,
@@ -28,7 +33,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await allowed(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const input = await request.json() as { action?: "detect" | "sync" | "analyze" | "retry_failed" | "seed_tutorials" | "backfill_all" | "grade_prompts"; signalId?: string };
 
   if (input.action === "retry_failed") {
