@@ -167,7 +167,7 @@ Core records include:
 - Participant, Team, Project, and consent state;
 - Prompt Event and AI Response;
 - Agent Run, Tutorial Step, Progress Event, and Error Event;
-- Feedback, Team Brain Note, and Evaluation Case;
+- Feedback, Shared Space Note, and Evaluation Case;
 - Participant Model Entry and Learning Signal;
 - Tutorial Version and Organizer Intervention.
 
