@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "admin" | "eventAdmin" | "settings";
 type PortalRole = "participant" | "organizer";
@@ -110,6 +110,7 @@ function LiveEvent({ config }: { config: EventConfig | null }) {
 
 export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
+  const viewHistoryInitialized = useRef(false);
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
   const [entryReady, setEntryReady] = useState(false);
   const [done, setDone] = useState<number[]>([0, 1, 2]);
@@ -151,16 +152,29 @@ export function HackathonPortal() {
     const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "admin", "eventAdmin", "settings"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
-    const onHashChange = () => { const next = window.location.hash.replace(/^#\/?/, ""); if (validViews.includes(next as View)) setView(next as View); };
-    window.addEventListener("hashchange", onHashChange);
-    return () => { window.clearTimeout(restoreTimer); window.removeEventListener("hashchange", onHashChange); };
+    const restoreFromHistory = () => {
+      const next = window.location.hash.replace(/^#\/?/, "");
+      if (validViews.includes(next as View)) setView(next as View);
+    };
+    window.addEventListener("hashchange", restoreFromHistory);
+    window.addEventListener("popstate", restoreFromHistory);
+    return () => {
+      window.clearTimeout(restoreTimer);
+      window.removeEventListener("hashchange", restoreFromHistory);
+      window.removeEventListener("popstate", restoreFromHistory);
+    };
   }, []);
 
   useEffect(() => {
     if (!viewRestored) return;
     window.localStorage.setItem("agentforge_current_view", view);
     const nextHash = `#/${view}`;
-    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+    if (!viewHistoryInitialized.current) {
+      viewHistoryInitialized.current = true;
+      if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+      return;
+    }
+    if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
   }, [view, viewRestored]);
 
   useEffect(() => {

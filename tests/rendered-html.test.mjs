@@ -25,3 +25,10 @@ test("keeps learning facts separate from Cognee interpretation", async () => {
   assert.match(migration, /cognee_sync_outbox/);
   assert.match(migration, /learning_signals/);
 });
+
+test("keeps internal navigation in browser history", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, /history\.pushState/);
+  assert.match(portal, /addEventListener\("hashchange", restoreFromHistory\)/);
+  assert.match(portal, /addEventListener\("popstate", restoreFromHistory\)/);
+});
