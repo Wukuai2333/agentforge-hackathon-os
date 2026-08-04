@@ -159,10 +159,13 @@ export const agentProjects = sqliteTable("agent_projects", {
 
 export const promptEvents = sqliteTable("prompt_events", {
   id: text("id").primaryKey(),
+  parentPromptEventId: text("parent_prompt_event_id"),
+  conversationId: text("conversation_id"),
   anonymousParticipantId: text("anonymous_participant_id").notNull(),
   anonymousTeamId: text("anonymous_team_id"),
   page: text("page").notNull(),
   tutorialStep: text("tutorial_step"),
+  taskReference: text("task_reference"),
   userPrompt: text("user_prompt").notNull(),
   systemPromptVersion: text("system_prompt_version").notNull(),
   contextType: text("context_type"),
@@ -178,9 +181,15 @@ export const promptEvents = sqliteTable("prompt_events", {
   status: text("status", { enum: ["success", "error", "blocked"] }).notNull(),
   errorCode: text("error_code"),
   userFeedback: text("user_feedback", { enum: ["helpful", "not_helpful"] }),
+  outcomeStatus: text("outcome_status", { enum: ["worked", "partial", "not_worked"] }),
+  outcomeEvidence: text("outcome_evidence"),
   improvementId: text("improvement_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+}, (table) => [
+  index("prompt_events_participant_created_idx").on(table.anonymousParticipantId, table.createdAt),
+  index("prompt_events_parent_idx").on(table.parentPromptEventId),
+  index("prompt_events_conversation_idx").on(table.conversationId, table.createdAt),
+]);
 
 export const assistantFeedbackEvents = sqliteTable("assistant_feedback_events", {
   id: text("id").primaryKey(),
@@ -246,7 +255,7 @@ export const organizerSettings = sqliteTable("organizer_settings", {
 // sanitized semantic records are delivered to Cognee independently.
 export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {
   id: text("id").primaryKey(),
-  sourceType: text("source_type", { enum: ["prompt_event", "participant_model", "agent_project", "shared_note", "feedback_event", "progress_event", "tutorial_content"] }).notNull(),
+  sourceType: text("source_type", { enum: ["prompt_event", "participant_model", "agent_project", "shared_note", "feedback_event", "progress_event", "tutorial_content", "coaching_action"] }).notNull(),
   sourceId: text("source_id").notNull(),
   datasetName: text("dataset_name").notNull(),
   payloadJson: text("payload_json").notNull(),
@@ -271,6 +280,19 @@ export const promptEvaluations = sqliteTable("prompt_evaluations", {
 }, (table) => [
   uniqueIndex("prompt_evaluations_prompt_rubric_unique").on(table.promptEventId, table.rubricVersion),
   index("prompt_evaluations_created_idx").on(table.createdAt),
+]);
+
+export const promptCoachingActions = sqliteTable("prompt_coaching_actions", {
+  id: text("id").primaryKey(),
+  promptEventId: text("prompt_event_id").notNull().references(() => promptEvents.id),
+  evaluationId: text("evaluation_id").references(() => promptEvaluations.id),
+  participantId: text("participant_id").notNull(),
+  action: text("action", { enum: ["copied_revision", "adopted_revision", "dismissed_coaching", "recorded_outcome"] }).notNull(),
+  note: text("note"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("prompt_coaching_actions_prompt_idx").on(table.promptEventId, table.createdAt),
+  index("prompt_coaching_actions_participant_idx").on(table.participantId, table.createdAt),
 ]);
 
 export const participantModelEntries = sqliteTable("participant_model_entries", {

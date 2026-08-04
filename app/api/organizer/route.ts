@@ -67,8 +67,11 @@ export async function GET(request: Request) {
       FROM learning_signals ORDER BY created_at DESC LIMIT 20`).all(),
     runtime.DB.prepare(`SELECT ev.id,ev.prompt_event_id AS promptEventId,ev.rubric_version AS rubricVersion,
       ev.evaluator,ev.evaluation_json AS evaluationJson,ev.total_score AS totalScore,ev.created_at AS createdAt,
-      pe.anonymous_participant_id AS participantId,pe.page,pe.user_prompt AS userPrompt
+      pe.anonymous_participant_id AS participantId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
+      pe.parent_prompt_event_id AS parentPromptEventId,parent.user_prompt AS parentPrompt,
+      pe.outcome_status AS outcomeStatus,pe.outcome_evidence AS outcomeEvidence
       FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
+      LEFT JOIN prompt_events parent ON parent.id=pe.parent_prompt_event_id
       ORDER BY ev.created_at DESC LIMIT 100`).all(),
     runtime.DB.prepare(`SELECT id,page,tutorial_step AS tutorialStep,category,label,participant_level AS participantLevel,prompt_count AS promptCount,
       participant_count AS participantCount,error_count AS errorCount,examples_json AS examplesJson,

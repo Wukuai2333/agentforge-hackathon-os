@@ -74,3 +74,21 @@ test("ships real team collaboration, transparent learning models, and evidence-l
   assert.match(organizer, /review_signal/);
   assert.match(migration, /participant_model_reviews/);
 });
+
+test("coaches Prompts against learning goals, iteration, and recorded outcomes", async () => {
+  const [portal, assistant, coaching, cognee, schema, migration] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/assistant/route.ts"), source("app/api/coaching/route.ts"),
+    source("app/api/cognee/route.ts"), source("db/schema.ts"), source("drizzle/0013_prompt_coaching_v3.sql"),
+  ]);
+  assert.match(portal, /Prompt Coach/);
+  assert.match(portal, /Learning agency/);
+  assert.match(portal, /Outcome stays unscored until evidence exists/);
+  assert.match(assistant, /parent_prompt_event_id/);
+  assert.match(coaching, /recorded_outcome/);
+  assert.match(coaching, /superseded/);
+  assert.match(cognee, /agentforge-prompt-coaching-v3/);
+  assert.match(cognee, /Do not reward length, formality, or jargon/);
+  assert.match(cognee, /deterministic_non_prompt_gate/);
+  assert.match(schema, /promptCoachingActions/);
+  assert.match(migration, /prompt_coaching_actions/);
+});

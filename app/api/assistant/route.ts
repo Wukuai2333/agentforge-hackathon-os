@@ -9,6 +9,8 @@ type AssistantInput = {
   anonymousParticipantId?: string;
   anonymousTeamId?: string;
   tutorialStep?: string;
+  parentPromptEventId?: string;
+  conversationId?: string;
 };
 
 type OpenAIResponse = {
@@ -34,9 +36,12 @@ export async function GET(request: Request) {
   if (auth.error) return auth.error;
   const participantId = auth.account!.participantId;
   const result = await runtime.DB.prepare(
-    `SELECT id, page, user_prompt AS userPrompt, response_text AS responseText,
+    `SELECT id, parent_prompt_event_id AS parentPromptEventId, conversation_id AS conversationId,
+            page, tutorial_step AS tutorialStep, task_reference AS taskReference,
+            user_prompt AS userPrompt, response_text AS responseText,
             model_name AS modelName, input_tokens AS inputTokens, output_tokens AS outputTokens,
-            status, error_code AS errorCode, created_at AS createdAt
+            status, error_code AS errorCode, outcome_status AS outcomeStatus,
+            outcome_evidence AS outcomeEvidence, created_at AS createdAt
        FROM prompt_events WHERE anonymous_participant_id = ?
        ORDER BY created_at DESC LIMIT 50`,
   ).bind(participantId.slice(0, 100)).all();
@@ -67,6 +72,12 @@ export async function POST(request: Request) {
   const tutorialStep = input.tutorialStep?.trim().slice(0, 150) || null;
   const model = runtime.OPENAI_MODEL || "gpt-5-mini";
   const eventId = crypto.randomUUID();
+  const requestedParentId = input.parentPromptEventId?.trim().slice(0, 100) || null;
+  const conversationId = input.conversationId?.trim().slice(0, 100) || eventId;
+  const taskReference = tutorialStep || page;
+  const parentPromptEventId = requestedParentId ? (await runtime.DB.prepare(
+    "SELECT id FROM prompt_events WHERE id=? AND anonymous_participant_id=?",
+  ).bind(requestedParentId, participantId).first<{ id: string }>())?.id || null : null;
 
   if (!prompt) return Response.json({ error: "Please enter a question." }, { status: 400 });
   if (!runtime.OPENAI_API_KEY) return Response.json({ error: "The organizer has not connected the OpenAI API yet." }, { status: 503 });
@@ -128,8 +139,9 @@ export async function POST(request: Request) {
   } finally {
     const occurredAt = Date.now();
     const memoryPayload = JSON.stringify({
-      schema_version: "agentforge.learning-event.v1", event_id: eventId, hackathon_event_id: auth.account!.eventId, event_type: "assistant_prompt",
+      schema_version: "agentforge.learning-event.v2", event_id: eventId, hackathon_event_id: auth.account!.eventId, event_type: "assistant_prompt",
       participant_id: participantId, team_id: teamId, page, tutorial_step: tutorialStep,
+      task_reference: taskReference, conversation_id: conversationId, parent_prompt_event_id: parentPromptEventId,
       question: sanitizeForMemory(prompt), selected_context: sanitizeForMemory(selectedContext),
       assistant_response: sanitizeForMemory(answer || ""), status, error_code: errorCode,
       input_tokens: inputTokens, output_tokens: outputTokens, cognee_memory_used: cogneeMemoryUsed,
@@ -137,12 +149,12 @@ export async function POST(request: Request) {
     });
     await runtime.DB.batch([runtime.DB.prepare(
       `INSERT INTO prompt_events
-        (id, anonymous_participant_id, anonymous_team_id, page, tutorial_step, user_prompt, system_prompt_version,
+        (id, parent_prompt_event_id, conversation_id, anonymous_participant_id, anonymous_team_id, page, tutorial_step, task_reference, user_prompt, system_prompt_version,
          context_type, context_reference, agent_name, model_name, response_text,
          latency_ms, input_tokens, output_tokens, status, error_code, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      eventId, participantId, teamId, page, tutorialStep, prompt, SYSTEM_PROMPT_VERSION,
+      eventId, parentPromptEventId, conversationId, participantId, teamId, page, tutorialStep, taskReference, prompt, SYSTEM_PROMPT_VERSION,
       selectedContext === "No text selected" ? "page" : "selected_text", selectedContext,
       "AgentForge Build Assistant", model, answer || null, Date.now() - startedAt,
       inputTokens, outputTokens, status, errorCode, occurredAt,
