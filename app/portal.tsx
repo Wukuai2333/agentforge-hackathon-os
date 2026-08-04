@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "data" | "admin" | "eventAdmin" | "settings";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings";
 type PortalRole = "participant" | "mentor" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type InitialIdentity = { id: string; displayName: string; email: string; fullName: string | null };
@@ -200,7 +200,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   }, [identity]);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "data", "admin", "eventAdmin", "settings"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "model", "data", "admin", "eventAdmin", "settings"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -253,7 +253,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : view === "data" ? "My Data" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   async function toggleMilestone(index: number) {
     const completed = !done.includes(index);
@@ -285,7 +285,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
 
   useEffect(() => {
     if (!portalUser) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "data", "settings"];
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "demo", "team", "model", "data", "settings"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const allowed = portalUser.role === "organizer" ? organizerViews : participantViews;
     if (!allowed.includes(view)) {
@@ -322,6 +322,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
           ))}
           <p className="nav-label">TEAM SPACE</p>
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Brain<span className="status-dot on" /></button>
+          <button className={view === "model" ? "nav-item active" : "nav-item"} onClick={() => setView("model")}><Icon>⌬</Icon>Learning Model</button>
           <button className={view === "data" ? "nav-item active" : "nav-item"} onClick={() => setView("data")}><Icon>▦</Icon>My Data</button>
           </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
@@ -353,6 +354,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
+          {view === "model" && <MyLearningModel />}
           {view === "data" && <MyData />}
           {view === "admin" && <Admin />}
           {view === "eventAdmin" && <EventManagement config={eventConfig} onSaved={setEventConfig} />}
@@ -505,7 +507,7 @@ function Demo() {
 }
 
 type NoteAttribution = { text: string; editorName: string; color: string };
-type SharedNote = { id: string; authorName: string; content: string; sourceType: "manual" | "assistant"; attributionJson?: string; updatedByName?: string; updatedAt?: number; createdAt: number };
+type SharedNote = { id: string; authorName: string; content: string; sourceType: "manual" | "assistant"; attributionJson?: string; updatedByName?: string; updatedAt?: number; revision?: number; createdAt: number };
 
 const memberColors = ["violet", "orange", "blue", "green", "pink"];
 function colorForMember(name: string) { return memberColors[[...name].reduce((total, char) => total + char.charCodeAt(0), 0) % memberColors.length]; }
@@ -522,12 +524,11 @@ function attributeEdit(note: SharedNote, next: string, editorName: string) {
   return attributed.reduce<NoteAttribution[]>((parts, char) => { const last = parts.at(-1); if (last && last.editorName === char.editorName && last.color === char.color) last.text += char.text; else parts.push({ ...char }); return parts; }, []);
 }
 
-function SharedNoteCard({ note, onUpdated }: { note: SharedNote; onUpdated: (note: SharedNote) => void }) {
+function SharedNoteCard({ note, editorName = "Team member", onUpdated }: { note: SharedNote; editorName?: string; onUpdated: (note: SharedNote) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note.content);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const editorName = "Yuxin Ren";
   async function save() {
     if (!draft.trim() || draft.trim() === note.content) { setEditing(false); return; }
     setSaving(true); setError("");
@@ -535,8 +536,9 @@ function SharedNoteCard({ note, onUpdated }: { note: SharedNote; onUpdated: (not
     if (!authorId) { authorId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", authorId); }
     const attributionJson = JSON.stringify(attributeEdit(note, draft.trim(), editorName));
     try {
-      const response = await fetch("/api/team-notes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ noteId: note.id, teamId: "team-synapse-demo", authorId, authorName: editorName, content: draft, attributionJson }) });
-      const result = await response.json() as { note?: Partial<SharedNote>; error?: string };
+      const response = await fetch("/api/team-notes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ noteId: note.id, content: draft, attributionJson, expectedUpdatedAt: note.updatedAt ?? null }) });
+      const result = await response.json() as { note?: Partial<SharedNote>; current?: SharedNote; conflict?: boolean; error?: string };
+      if (response.status === 409 && result.current) { onUpdated(result.current); setDraft(result.current.content); throw new Error(result.error || "A teammate saved a newer version."); }
       if (!response.ok || !result.note) throw new Error(result.error || "Note could not be updated.");
       onUpdated({ ...note, ...result.note, attributionJson }); setEditing(false);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Note could not be updated."); }
@@ -545,7 +547,8 @@ function SharedNoteCard({ note, onUpdated }: { note: SharedNote; onUpdated: (not
   return <article><header><span className={`member-avatar ${colorForMember(note.authorName)}`}>{note.authorName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{note.authorName}</strong><small>{new Date(note.createdAt).toLocaleString()} · {note.updatedAt ? `Edited by ${note.updatedByName} ${new Date(note.updatedAt).toLocaleString()}` : note.sourceType === "assistant" ? "Saved from AI Assistant" : "Added by team member"}</small></div><span className={note.sourceType === "assistant" ? "note-source ai" : "note-source"}>{note.sourceType === "assistant" ? "AI NOTE" : "TEAM NOTE"}</span><button className="note-edit-button" onClick={() => { setDraft(note.content); setEditing(true); }}>Edit</button></header>{editing ? <div className="note-editor"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={5} /><div>{error && <small className="form-error">{error}</small>}<button className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="primary" onClick={() => void save()} disabled={saving || !draft.trim()}>{saving ? "Saving…" : "Save changes"}</button></div></div> : <p className="attributed-note">{noteAttributions(note).map((part, index) => <span key={`${part.editorName}-${index}`} className={`note-attribution ${part.color}`} title={`${part.editorName} added or edited this text`}>{part.text}</span>)}</p>}</article>;
 }
 
-function TeamSpace() {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyTeamSpace() {
   const [tab, setTab] = useState<"activity" | "notes" | "memories" | "questions">("notes");
   const [notes, setNotes] = useState<SharedNote[]>([]);
   const [noteDraft, setNoteDraft] = useState("");
@@ -606,6 +609,64 @@ function TeamSpace() {
   </>;
 }
 
+type TeamOverview = {
+  account: PortalUser;
+  team: { id: string; name: string; inviteCode: string } | null;
+  members: Array<{ id: string; displayName: string; role: string; membershipRole: string; joinedAt: number }>;
+  projects: Array<{ id: string; title: string; problem: string; successCriteria?: string; status: string; participantId: string; updatedAt: number }>;
+  progress: Array<{ participantId: string; displayName: string; milestone: string; status: string; source: string; occurredAt: number }>;
+  memories: Array<{ id: string; entryKind: string; category: string; statement: string; participantName?: string; memoryStatus?: string; observedAt: number }>;
+  questions: Array<{ id: string; participantId: string; page: string; tutorialStep?: string; userPrompt: string; responseText?: string; status: string; createdAt: number }>;
+};
+
+function TeamSpace() {
+  const [data, setData] = useState<TeamOverview | null>(null);
+  const [notes, setNotes] = useState<SharedNote[]>([]);
+  const [tab, setTab] = useState<"notes" | "canvas" | "progress" | "memory" | "questions">("notes");
+  const [draft, setDraft] = useState("");
+  const [teamMode, setTeamMode] = useState<"create" | "join">("create");
+  const [teamValue, setTeamValue] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function refresh(silent = false) {
+    if (!silent) setBusy(true);
+    try {
+      const [teamResponse, noteResponse] = await Promise.all([fetch("/api/team"), fetch("/api/team-notes")]);
+      const teamResult = await teamResponse.json() as TeamOverview & { error?: string };
+      const noteResult = await noteResponse.json() as { notes?: SharedNote[]; error?: string };
+      if (!teamResponse.ok) throw new Error(teamResult.error || "Team workspace could not be loaded.");
+      setData(teamResult); if (noteResponse.ok) setNotes(noteResult.notes || []); setError("");
+    } catch (problem) { if (!silent) setError(problem instanceof Error ? problem.message : "Team workspace could not be loaded."); }
+    finally { if (!silent) setBusy(false); }
+  }
+  useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(true), 10000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
+
+  async function accountAction(action: string, extra: Record<string, unknown> = {}) {
+    setBusy(true); setError("");
+    try { const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Team could not be updated."); setTeamValue(""); await refresh(true); }
+    catch (problem) { setError(problem instanceof Error ? problem.message : "Team could not be updated."); }
+    finally { setBusy(false); }
+  }
+  async function addNote() {
+    if (!draft.trim()) return; setBusy(true);
+    try { const response = await fetch("/api/team-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: draft, sourceType: "manual" }) }); const result = await response.json() as { note?: SharedNote; error?: string }; if (!response.ok || !result.note) throw new Error(result.error || "Note could not be added."); setNotes((items) => [result.note!, ...items]); setDraft(""); setError(""); }
+    catch (problem) { setError(problem instanceof Error ? problem.message : "Note could not be added."); } finally { setBusy(false); }
+  }
+  async function regenerateInvite() {
+    setBusy(true); try { const response = await fetch("/api/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "regenerate_invite" }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Invite code could not be regenerated."); await refresh(true); } catch (problem) { setError(problem instanceof Error ? problem.message : "Invite code could not be regenerated."); } finally { setBusy(false); }
+  }
+
+  if (!data) return <div className="team-loading"><h2>{busy ? "Loading team workspace…" : "Team workspace unavailable"}</h2>{error && <p className="form-error">{error}</p>}</div>;
+  if (!data.team) return <div className="team-onboarding-card"><span className="eyebrow">TEAM MANAGEMENT</span><h2>Create a team or join one.</h2><p>One participant can have one active team. Switching teams closes the old membership while retaining its event history.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join</button></div><input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Team name" : "Invite code"} />{error && <p className="form-error">{error}</p>}<button className="primary" disabled={busy || !teamValue.trim()} onClick={() => void accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue })}>{busy ? "Saving…" : teamMode === "create" ? "Create team" : "Join team"}</button></div>;
+
+  const creator = data.members.find((member) => member.id === data.account.participantId)?.membershipRole === "creator";
+  const latestProgress = new Map<string, TeamOverview["progress"][number]>(); for (const item of data.progress) if (!latestProgress.has(`${item.participantId}:${item.milestone}`)) latestProgress.set(`${item.participantId}:${item.milestone}`, item);
+  const completed = [...latestProgress.values()].filter((item) => item.status === "completed" || item.status === "verified").length;
+  return <div className="real-team-space"><section className="team-command"><div><span className="team-logo large">{data.team.name[0]?.toUpperCase()}</span><div><span className="eyebrow">REAL TEAM WORKSPACE</span><h2>{data.team.name}</h2><p>{data.members.length} active members · refreshes every 10 seconds</p></div></div><div className="invite-control"><small>INVITE CODE</small><strong>{data.team.inviteCode}</strong><button onClick={() => { void navigator.clipboard.writeText(data.team!.inviteCode); setCopied(true); }}>{copied ? "Copied" : "Copy"}</button>{creator && <button onClick={() => void regenerateInvite()} disabled={busy}>Regenerate</button>}<button className="danger-link" onClick={() => void accountAction("leave_team")} disabled={busy}>Leave team</button></div></section>{error && <p className="form-error">{error}</p>}<section className="team-live-metrics"><article><small>MEMBERS</small><strong>{data.members.length}</strong><span>{data.members.map((item) => item.displayName).join(", ")}</span></article><article><small>SHARED NOTES</small><strong>{notes.length}</strong><span>Attributed edit history</span></article><article><small>PROJECT CANVASES</small><strong>{data.projects.length}</strong><span>Visible to current team</span></article><article><small>PROGRESS EVENTS</small><strong>{completed}</strong><span>Latest completed milestones</span></article></section><section className="team-live-panel"><nav>{(["notes", "canvas", "progress", "memory", "questions"] as const).map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{item}</button>)}</nav>{tab === "notes" && <div className="shared-notes"><div className="note-composer"><textarea rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Add a shared decision, finding, or reminder…" /><div><small>Visible to all current members of {data.team.name}</small><button className="primary" onClick={() => void addNote()} disabled={busy || !draft.trim()}>Add note</button></div></div>{notes.length ? <div className="note-list">{notes.map((note) => <SharedNoteCard key={note.id} note={note} editorName={data.account.displayName} onUpdated={(updated) => setNotes((items) => items.map((item) => item.id === updated.id ? updated : item))} />)}</div> : <p className="notes-empty">No shared notes yet.</p>}</div>}{tab === "canvas" && <div className="team-record-list">{data.projects.length ? data.projects.map((project) => <article key={project.id}><small>{project.status.toUpperCase()} · {new Date(project.updatedAt).toLocaleString()}</small><h3>{project.title}</h3><p>{project.problem}</p><strong>Success: {project.successCriteria || "Not defined"}</strong></article>) : <p className="notes-empty">No team member has saved a project Canvas while in this team.</p>}</div>}{tab === "progress" && <div className="team-progress-board">{data.members.map((member) => { const entries = [...latestProgress.values()].filter((item) => item.participantId === member.id && (item.status === "completed" || item.status === "verified")); return <article key={member.id}><header><strong>{member.displayName}</strong><span>{entries.length}/11</span></header><div><i style={{ width: `${Math.min(100, entries.length / 11 * 100)}%` }} /></div><p>{entries.slice(0, 4).map((item) => item.milestone).join(" · ") || "No completed milestones yet"}</p></article>; })}</div>}{tab === "memory" && <div className="team-record-list">{data.memories.length ? data.memories.map((memory) => <article key={memory.id}><small>{memory.entryKind.toUpperCase()} · {memory.category} · {memory.memoryStatus || "not queued"}</small><h3>{memory.statement}</h3><p>{memory.participantName || "Team participant"} · {new Date(memory.observedAt).toLocaleString()}</p></article>) : <p className="notes-empty">No Team-scoped participant memory yet.</p>}</div>}{tab === "questions" && <div className="team-record-list">{data.questions.length ? data.questions.map((question) => <article key={question.id}><small>{question.page} · {new Date(question.createdAt).toLocaleString()}</small><h3>{question.userPrompt}</h3><p>{question.responseText || question.status}</p></article>) : <p className="notes-empty">No team-linked Assistant questions yet.</p>}</div>}</section></div>;
+}
+
 type OrganizerData = {
   summary: { totalPrompts: number; inputTokens: number; outputTokens: number; successRate: number; avgLatencyMs: number; lastHour: number };
   hourly: Array<{ hour: string; prompts: number; tokens: number }>;
@@ -615,7 +676,9 @@ type OrganizerData = {
   settings: { assistantEnabled: number; defaultTeamTokenQuota: number };
   cognee: { connected: boolean; sync: Array<{ status: string; count: number }> };
   participantModel: Array<{ entryKind: string; count: number }>;
-  learningSignals: Array<{ id: string; page: string; tutorialStep?: string; promptCount: number; participantCount: number; errorCount: number; negativeFeedbackCount: number; detectionRule: string; cogneeSummary?: string; reviewStatus: string; createdAt: number }>;
+  learningSignals: Array<{ id: string; page: string; tutorialStep?: string; promptCount: number; participantCount: number; errorCount: number; negativeFeedbackCount: number; detectionRule: string; cogneeSummary?: string; suggestedAction?: string; reviewStatus: string; createdAt: number }>;
+  promptClusters: Array<{ id: string; page: string; tutorialStep?: string; category: string; label: string; promptCount: number; participantCount: number; errorCount: number; examplesJson: string; windowStartedAt: number; windowEndedAt: number; createdAt: number }>;
+  signalEvidence: Array<{ signalId: string; promptEventId: string; userPrompt: string; status: string; errorCode?: string; userFeedback?: string; createdAt: number }>;
   feedbacks: Array<{ id: string; promptEventId: string; participantId: string; teamId?: string | null; participantDisplayName: string; feedback: "helpful" | "not_helpful"; page: string; tutorialStep?: string | null; userPrompt: string; createdAt: number }>;
   promptEvaluations: Array<{ id: string; promptEventId: string; rubricVersion: string; evaluator: string; evaluationJson: string; totalScore?: number | null; createdAt: number; participantId: string; page: string; userPrompt: string }>;
 };
@@ -761,6 +824,19 @@ function Admin() {
     if (response.ok) await loadOrganizer();
   }
 
+  async function reviewSignal(signalId: string, decision: "approved" | "rejected" | "reviewing", editedSummary?: string, suggestedAction?: string) {
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ action: "review_signal", signalId, decision, editedSummary, suggestedAction }) });
+    if (response.ok) await loadOrganizer(); else setError("Learning signal review could not be saved.");
+  }
+
+  async function editSignal(signal: OrganizerData["learningSignals"][number]) {
+    const summary = window.prompt("Edit the evidence-grounded interpretation", signal.cogneeSummary || "");
+    if (summary == null) return;
+    const action = window.prompt("Edit the suggested organizer action", signal.suggestedAction || "");
+    if (action == null) return;
+    await reviewSignal(signal.id, "reviewing", summary, action);
+  }
+
   async function deletePrompt(id: string) {
     const response = await fetch(`/api/organizer?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-organizer-code": accessCode } });
     if (response.ok) { setSelectedPrompt(null); await loadOrganizer(); }
@@ -796,13 +872,15 @@ function Admin() {
   const currentRubricIds = new Set(data.promptEvaluations.filter((item) => item.rubricVersion === "agentforge-prompt-quality-v2").map((item) => item.promptEventId));
   const awaitingEvaluations = data.prompts.filter((item) => item.status === "success" && !currentRubricIds.has(item.id));
   return <>
+    {data.learningSignals.length > 0 && <section className="signal-review-queue"><div className="table-title"><div><h3>Human Review Queue</h3><p>Edit, approve, or reject Cognee interpretations before they influence tutorial changes.</p></div></div>{data.learningSignals.map((signal) => <div key={`review-${signal.id}`}><span><strong>{signal.page} · {signal.tutorialStep || "General"}</strong><small>{signal.reviewStatus}</small></span><button onClick={() => void editSignal(signal)}>Edit</button><button onClick={() => void reviewSignal(signal.id, "approved")} disabled={signal.reviewStatus === "approved"}>Approve</button><button onClick={() => void reviewSignal(signal.id, "rejected")} disabled={signal.reviewStatus === "rejected"}>Reject</button></div>)}</section>}
     <div className="live-admin-head"><div><span className="eyebrow">LIVE ORGANIZER PORTAL</span><h2>Prompt and Token Operations</h2><p>Connected to real AgentForge prompt events. Sensitive patterns are masked before display.</p></div><div><button className="outline-button" onClick={exportCsv}>Export CSV</button><button className="outline-button" onClick={() => void loadOrganizer()}>Refresh</button></div></div>
     <div className="metric-grid explained live-metrics"><article><small>TOTAL PROMPTS</small><strong>{data.summary.totalPrompts}</strong><span>{data.summary.lastHour} in the last hour</span><p>All recorded Assistant requests.</p></article><article><small>TOTAL TOKENS</small><strong>{totalTokens.toLocaleString()}</strong><span>{Number(data.summary.inputTokens).toLocaleString()} in · {Number(data.summary.outputTokens).toLocaleString()} out</span><p>Actual usage reported by OpenAI.</p></article><article><small>SUCCESS RATE</small><strong>{data.summary.successRate}%</strong><span>{100 - Number(data.summary.successRate)}% errors</span><p>Requests that returned a usable answer.</p></article><article><small>AVG. LATENCY</small><strong>{(Number(data.summary.avgLatencyMs) / 1000).toFixed(1)}s</strong><span>End-to-end response time</span><p>Includes OpenAI generation time.</p></article></div>
     <section className="admin-controls"><div><span className={data.settings.assistantEnabled ? "control-dot on" : "control-dot"} /><span><small>AI ASSISTANT</small><strong>{data.settings.assistantEnabled ? "Running" : "Paused"}</strong></span><button className={data.settings.assistantEnabled ? "danger-button" : "primary"} onClick={() => void updateSettings(!data.settings.assistantEnabled)}>{data.settings.assistantEnabled ? "Pause assistant" : "Resume assistant"}</button></div><div><span><small>DEFAULT TEAM QUOTA</small><strong>{quota.toLocaleString()} tokens</strong></span><div className="quota-bar"><i style={{ width: `${Math.min(100, (totalTokens / quota) * 100)}%` }} /></div><button className="outline-button" onClick={() => { const next = window.prompt("Default tokens per team", String(quota)); if (next) void updateSettings(Boolean(data.settings.assistantEnabled), Number(next)); }}>Edit quota</button></div></section>
     {error && <p className="form-error organizer-error">{error}</p>}
     <section className="cognee-operations"><div className="table-title"><div><span className="eyebrow">COGNEE SEMANTIC MEMORY</span><h3>Hackathon Learning Memory</h3><p>Prompts, responses, participant-model facts, project canvases, feedback, Team Brain notes, and tutorial content are organized by node set.</p></div><span className={`pill ${data.cognee.connected ? "on-track" : "needs-help"}`}>{data.cognee.connected ? "Cloud connected" : "API key required"}</span></div><div className="cognee-status-grid">{["pending", "syncing", "synced", "error"].map((status) => <div key={status}><small>{status.toUpperCase()}</small><strong>{Number(data.cognee.sync.find((item) => item.status === status)?.count || 0)}</strong><p>{status === "pending" ? "Memory events waiting for delivery." : status === "synced" ? "Events accepted and sent for graph processing." : status === "error" ? "Safe to retry; original operational records remain intact." : "Batch currently being delivered."}</p></div>)}</div><div className="cognee-action-guide"><span><b>1</b>Queue creates missing outbox records</span><i>→</i><span><b>2</b>Sync sends pending records to Cognee</span><i>→</i><span><b>3</b>Cognify runs in the background</span></div>{cogneeNotice && <div className="cognee-action-notice" role="status"><b>✓</b><span>{cogneeNotice}</span></div>}<div className="cognee-actions"><button className="outline-button" title="Queue the current ClawMax placeholder and Cognee tutorial summary. This does not crawl documentation." onClick={() => void runCognee("seed_tutorials")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "seed_tutorials" ? "Checking tutorials…" : "Queue tutorial memory"}</button><button className="outline-button" title="Find historical Prompts, projects, notes, and feedback that have not entered the Cognee outbox." onClick={() => void runCognee("backfill_all")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "backfill_all" ? "Checking history…" : "Backfill existing data"}</button><button className="outline-button" onClick={() => void runCognee("detect")} disabled={Boolean(cogneeAction)}>{cogneeAction === "detect" ? "Checking…" : "Detect learning signals"}</button><button className="outline-button" onClick={() => void runCognee("grade_prompts")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "grade_prompts" ? "Grading…" : "Grade prompts with Cognee"}</button><button className="primary" onClick={() => void runCognee("sync")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "sync" ? "Syncing…" : "Sync all pending memory"}</button></div></section>
     <section className="prompt-evaluations"><div className="table-title"><div><span className="eyebrow">PROMPT COACHING · AI INFERENCE</span><h3>Cognee Prompt Quality Evaluations</h3><p>Every successful Prompt appears here. Evaluation is organizer-triggered so new Prompts do not spend AI tokens automatically.</p></div><span>{visibleEvaluations.length} evaluated · {awaitingEvaluations.length} awaiting</span></div>{awaitingEvaluations.length > 0 && <div className="evaluation-queue"><header><div><span className="eyebrow">AWAITING EVALUATION</span><h4>{awaitingEvaluations.length} successful Prompt{awaitingEvaluations.length === 1 ? "" : "s"} not yet evaluated with rubric v2</h4><p>The next click evaluates one Prompt. Obvious non-Prompts such as digits are handled by zero-token rules.</p></div><button className="primary" onClick={() => void runCognee("grade_prompts")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "grade_prompts" ? "Evaluating…" : "Evaluate next Prompt"}</button></header><div>{awaitingEvaluations.slice(0, 8).map((item, index) => <article key={item.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.userPrompt}</strong><small>{item.page} · {new Date(item.createdAt).toLocaleString()}</small></div><span className="evaluation-pending-pill">AWAITING</span></article>)}</div>{awaitingEvaluations.length > 8 && <small className="queue-more">+ {awaitingEvaluations.length - 8} more Prompt{awaitingEvaluations.length - 8 === 1 ? "" : "s"} in the queue</small>}</div>}{visibleEvaluations.length ? <div className="evaluation-list">{visibleEvaluations.map((item) => <PromptEvaluationCard key={item.id} item={item} />)}</div> : <p className="notes-empty">No completed evaluations yet. Use “Evaluate next Prompt” above when you are ready.</p>}</section>
-    <section className="learning-signal-live"><div className="table-title"><div><h3>Detected Learning Signals</h3><p>Counts are rule-based SQL facts. Cognee adds an evidence-grounded interpretation only when requested.</p></div></div>{data.learningSignals.length ? data.learningSignals.map((signal) => <article key={signal.id}><div><span className="eyebrow">{signal.reviewStatus}</span><h4>{signal.page} · {signal.tutorialStep || "General page"}</h4><p><b>{signal.promptCount}</b> prompts from <b>{signal.participantCount}</b> participants · {signal.errorCount} errors · {signal.negativeFeedbackCount} negative feedback</p><small>FACTS: calculated by {signal.detectionRule}. These counts are not generated by AI.</small></div><div className="signal-interpretation"><b>COGNEE INTERPRETATION</b><p>{signal.cogneeSummary || "Not generated yet. An organizer may request analysis after evidence has synced."}</p><small>INFERENCE: requires human review and must remain linked to its source signal.</small></div><button className="outline-button" onClick={() => void runCognee("analyze", signal.id)} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === `analyze:${signal.id}` ? "Analyzing…" : "Analyze with Cognee"}</button></article>) : <div className="empty-live-state"><strong>No learning signal currently crosses the threshold.</strong><p>This is a real empty state—not demo data. Run detection after participants begin asking questions.</p></div>}</section>
+    <section className="prompt-cluster-panel"><div className="table-title"><div><span className="eyebrow">ZERO-TOKEN PROMPT CLUSTERING</span><h3>Common Questions & Error Categories</h3><p>Deterministic keyword/error rules group the last hour by tutorial step before any AI interpretation.</p></div><span>{data.promptClusters?.length || 0} clusters</span></div><div className="cluster-grid">{data.promptClusters?.length ? data.promptClusters.slice(0, 12).map((cluster) => <article key={cluster.id}><span>{cluster.category.replaceAll("_", " ")}</span><h4>{cluster.page} · {cluster.tutorialStep || "General"}</h4><div><b>{cluster.promptCount} prompts</b><b>{cluster.participantCount} participants</b><b>{cluster.errorCount} errors</b></div><details><summary>Representative examples</summary>{(() => { try { return (JSON.parse(cluster.examplesJson) as string[]).slice(0, 4).map((example) => <p key={example}>{example}</p>); } catch { return <p>Examples unavailable.</p>; } })()}</details></article>) : <p className="notes-empty">Run “Detect learning signals” after Prompt activity to create real clusters.</p>}</div></section>
+    <section className="learning-signal-live"><div className="table-title"><div><h3>Detected Learning Signals</h3><p>Counts are rule-based SQL facts. Cognee adds an evidence-grounded interpretation only when requested.</p></div></div>{data.learningSignals.length ? data.learningSignals.map((signal) => { const evidence = (data.signalEvidence || []).filter((item) => item.signalId === signal.id); return <article key={signal.id}><div><span className="eyebrow">{signal.reviewStatus}</span><h4>{signal.page} · {signal.tutorialStep || "General page"}</h4><p><b>{signal.promptCount}</b> prompts from <b>{signal.participantCount}</b> participants · {signal.errorCount} errors · {signal.negativeFeedbackCount} negative feedback</p><small>FACTS: calculated by {signal.detectionRule}. These counts are not generated by AI.</small><details className="signal-evidence"><summary>View {evidence.length} linked Prompt examples</summary>{evidence.map((item) => <p key={item.promptEventId}><b>{item.status}</b> {item.userPrompt}</p>)}</details></div><div className="signal-interpretation"><b>COGNEE INTERPRETATION</b><p>{signal.cogneeSummary || "Not generated yet. An organizer may request analysis after evidence has synced."}</p><small>INFERENCE: requires human review and remains linked to the Prompt examples at left.</small>{signal.suggestedAction && <strong>Suggested action: {signal.suggestedAction}</strong>}</div><div className="signal-review-actions"><button className="outline-button" onClick={() => void runCognee("analyze", signal.id)} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === `analyze:${signal.id}` ? "Analyzing…" : "Analyze with Cognee"}</button><button onClick={() => void reviewSignal(signal.id, "approved")} disabled={signal.reviewStatus === "approved"}>Approve</button><button onClick={() => void reviewSignal(signal.id, "rejected")} disabled={signal.reviewStatus === "rejected"}>Reject</button></div></article>; }) : <div className="empty-live-state"><strong>No learning signal currently crosses the threshold.</strong><p>This is a real empty state—not demo data. Run detection after participants begin asking questions.</p></div>}</section>
     <div className="live-admin-grid"><section className="usage-panel"><div className="table-title"><div><h3>Hourly Token Trend</h3><p>Last 24 recorded hours</p></div></div><div className="usage-bars">{data.hourly.length ? data.hourly.map((item) => { const max = Math.max(...data.hourly.map((point) => Number(point.tokens)), 1); return <div key={item.hour} title={`${item.hour}: ${item.tokens} tokens`}><i style={{ height: `${Math.max(6, Number(item.tokens) / max * 100)}%` }} /><small>{item.hour.slice(11, 16)}</small></div>; }) : <p>No token data yet.</p>}</div></section><section className="usage-panel"><div className="table-title"><div><h3>Usage by Page & Step</h3><p>Where participants ask and fail</p></div></div><div className="compact-rows">{data.pages.map((item) => <div key={`${item.page}-${item.tutorialStep}`}><span><strong>{item.page}</strong><small>{item.tutorialStep || "General page"}</small></span><b>{item.prompts} prompts</b><em>{item.errors} errors</em><small>{Number(item.tokens).toLocaleString()} tokens</small></div>)}</div></section></div>
     <section className="prompt-monitor"><div className="table-title"><div><h3>Recent Prompts</h3><p>Latest 100 · click a row to inspect the masked prompt and response</p></div><span>Protected organizer data</span></div><div className="prompt-table"><div className="prompt-row heading"><span>TIME</span><span>PAGE</span><span>PROMPT</span><span>TOKENS</span><span>STATUS</span></div>{data.prompts.map((item) => <button className="prompt-row" key={item.id} onClick={() => setSelectedPrompt(item)}><span>{new Date(item.createdAt).toLocaleTimeString()}</span><span>{item.page}</span><span>{item.userPrompt}</span><span>{Number(item.inputTokens || 0) + Number(item.outputTokens || 0)}</span><span className={`pill ${item.status === "success" ? "on-track" : "blocked"}`}>{item.status}</span></button>)}</div></section>
     <section className="feedback-monitor"><div className="table-title"><div><h3>Recent Assistant Feedback</h3><p>Real Helpful / Not helpful events · participant identity will resolve to login accounts when authentication is connected</p></div><span>{data.feedbacks.length} recorded</span></div><div className="feedback-table"><div className="feedback-row heading"><span>TIME</span><span>PARTICIPANT</span><span>PAGE</span><span>PROMPT</span><span>FEEDBACK</span></div>{data.feedbacks.map((item) => <div className="feedback-row" key={item.id}><span>{new Date(item.createdAt).toLocaleString()}</span><span><strong>{item.participantDisplayName}</strong><small title={item.participantId}>{item.participantId.slice(0, 12)}… · {item.teamId || "Unassigned"}</small></span><span>{item.page}<small>{item.tutorialStep || "General page"}</small></span><span>{item.userPrompt}</span><span className={`pill ${item.feedback === "helpful" ? "on-track" : "needs-help"}`}>{item.feedback === "helpful" ? "Helpful" : "Not helpful"}</span></div>)}{!data.feedbacks.length && <p className="notes-empty">No participant feedback has been recorded yet.</p>}</div></section>
@@ -840,6 +918,25 @@ function _AdminDemo() {
   ].map(([n, title, text]) => <article key={n}><b>{n}</b><h3>{title}</h3><p>{text}</p></article>)}</div>
   <div className="signal-reality-grid"><article><span>ZERO-TOKEN DETECTION</span><h3>Rules find the problem first.</h3><pre>{`IF questions ≥ 15\nAND unique students ≥ 5\nOR error rate ≥ 20%\nOR negative feedback ≥ 25%\n→ create Learning Signal`}</pre><p>Counts, timestamps, error events, milestone activity, and feedback come directly from the database. No model call is required.</p></article><article><span>OPTIONAL AI, ON DEMAND</span><h3>Use AI only for the draft.</h3><p>When an organizer clicks <b>Draft tutorial update</b>, one optional model call can summarize 3–5 anonymized examples and propose a clearer checkpoint. The draft never publishes automatically.</p><div className="human-review">Human review → Edit → Approve → Publish or reject</div></article><article><span>MEASURE THE RESULT</span><h3>Did the tutorial actually improve?</h3><div className="comparison"><div><small>METRIC</small><small>BEFORE</small><small>AFTER</small></div><div><span>Completion rate</span><b>58%</b><strong>81%</strong></div><div><span>Average time</span><b>19 min</b><strong>11 min</strong></div><div><span>Help requests</span><b>38</b><strong>12</strong></div><div><span>Error rate</span><b>24%</b><strong>9%</strong></div></div><p>These demo values show the comparison we would calculate from real participant events after a tutorial version is published.</p></article></div>
   <footer><strong>Recommended MVP</strong><span>Prompt + step tracking → scheduled database aggregation → threshold rules → keyword/error-code categories → human-reviewed template draft → before/after metrics.</span></footer></section></>;
+}
+
+type LearningModelEntry = { id: string; entryKind: "fact" | "inference" | "confirmation"; category: string; statement: string; sourceType: string; sourceId?: string; confidencePercent?: number; confirmedByParticipant: number; supersededById?: string; observedAt: number; memoryStatus?: string; datasetName?: string; evidencePreview?: string };
+type LearningModelReview = { id: string; entryId: string; action: "confirmed" | "corrected" | "disputed"; replacementEntryId?: string; note?: string; createdAt: number };
+
+function MyLearningModel() {
+  const [entries, setEntries] = useState<LearningModelEntry[]>([]);
+  const [reviews, setReviews] = useState<LearningModelReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<LearningModelEntry | null>(null);
+  const [correction, setCorrection] = useState("");
+  const [filter, setFilter] = useState<"all" | "fact" | "inference" | "confirmation">("all");
+  async function load() { setLoading(true); try { const response = await fetch("/api/model"); const result = await response.json() as { entries?: LearningModelEntry[]; reviews?: LearningModelReview[]; error?: string }; if (!response.ok) throw new Error(result.error || "Learning model could not be loaded."); setEntries(result.entries || []); setReviews(result.reviews || []); setError(""); } catch (problem) { setError(problem instanceof Error ? problem.message : "Learning model could not be loaded."); } finally { setLoading(false); } }
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, []);
+  async function review(action: "confirm" | "correct" | "dispute", entry: LearningModelEntry) { try { const response = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, entryId: entry.id, correction: action === "correct" ? correction : undefined }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Review could not be saved."); setEditing(null); setCorrection(""); await load(); } catch (problem) { setError(problem instanceof Error ? problem.message : "Review could not be saved."); } }
+  const visible = entries.filter((entry) => filter === "all" || entry.entryKind === filter);
+  const reviewFor = (id: string) => reviews.find((reviewItem) => reviewItem.entryId === id);
+  return <div className="learning-model-page"><section className="model-hero"><div><span className="eyebrow">TRANSPARENT PARTICIPANT MODEL</span><h2>Facts, observations, and inference stay separate.</h2><p>You can see the evidence behind each item, confirm an inference, dispute it, or replace it with a corrected fact. Earlier records remain in the audit trail.</p></div><div className="model-legend"><span className="fact">FACT</span><span className="inference">AI INFERENCE</span><span className="confirmation">CONFIRMATION</span></div></section><section className="model-summary">{(["fact", "inference", "confirmation"] as const).map((kind) => <article key={kind}><small>{kind.toUpperCase()}</small><strong>{entries.filter((entry) => entry.entryKind === kind).length}</strong><span>{kind === "fact" ? "Reported or observed evidence" : kind === "inference" ? "Requires participant review" : "Participant review events"}</span></article>)}</section><nav className="model-filters">{(["all", "fact", "inference", "confirmation"] as const).map((kind) => <button className={filter === kind ? "active" : ""} onClick={() => setFilter(kind)} key={kind}>{kind}</button>)}</nav>{error && <p className="form-error">{error}</p>}{loading ? <p className="notes-empty">Loading learning model…</p> : <section className="model-list">{visible.length ? visible.map((entry) => { const reviewItem = reviewFor(entry.id); return <article className={`model-card ${entry.entryKind} ${entry.supersededById ? "superseded" : ""}`} key={entry.id}><header><span>{entry.entryKind === "inference" ? "AI INFERENCE" : entry.entryKind.toUpperCase()}</span><small>{entry.category.replaceAll("_", " ")} · {new Date(entry.observedAt).toLocaleString()}</small></header><h3>{entry.statement}</h3><div className="model-evidence"><div><small>EVIDENCE SOURCE</small><strong>{entry.sourceType}</strong><p>{entry.evidencePreview || entry.sourceId || "Structured event record"}</p></div><div><small>CONFIDENCE</small><strong>{entry.entryKind === "fact" && entry.confirmedByParticipant ? "Confirmed" : entry.confidencePercent != null ? `${entry.confidencePercent}%` : "Not assigned"}</strong><p>{entry.memoryStatus || "not queued"} · {entry.datasetName || "AgentForge operational record"}</p></div></div>{entry.supersededById && <p className="model-status superseded">Superseded by a newer participant correction.</p>}{reviewItem && <p className={`model-status ${reviewItem.action}`}>Participant review: {reviewItem.action} · {new Date(reviewItem.createdAt).toLocaleString()}</p>}{entry.entryKind === "inference" && !entry.supersededById && !reviewItem && <footer><button className="outline-button" onClick={() => void review("confirm", entry)}>Confirm</button><button className="outline-button" onClick={() => void review("dispute", entry)}>Dispute</button><button className="primary" onClick={() => { setEditing(entry); setCorrection(""); }}>Correct it</button></footer>}</article>; }) : <p className="notes-empty">No entries match this view yet.</p>}</section>}{editing && <div className="modal-backdrop" onMouseDown={() => setEditing(null)}><section className="model-correction" onMouseDown={(event) => event.stopPropagation()}><span className="eyebrow">PARTICIPANT CORRECTION</span><h2>Replace this inference with your own statement.</h2><blockquote>{editing.statement}</blockquote><textarea rows={5} value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="Write the corrected fact…" /><div><button className="text-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={!correction.trim()} onClick={() => void review("correct", editing)}>Save correction</button></div><small>The original inference remains visible as superseded evidence.</small></section></div>}</div>;
 }
 
 type MyDataPayload = {

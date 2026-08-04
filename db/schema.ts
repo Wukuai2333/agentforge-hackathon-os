@@ -218,6 +218,7 @@ export const sharedNotes = sqliteTable("shared_notes", {
   updatedByName: text("updated_by_name"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }),
+  revision: integer("revision").notNull().default(1),
 }, (table) => [
   index("shared_notes_team_created_idx").on(table.teamId, table.createdAt),
 ]);
@@ -291,6 +292,16 @@ export const participantModelEntries = sqliteTable("participant_model_entries", 
   index("participant_model_kind_idx").on(table.entryKind),
 ]);
 
+export const participantModelReviews = sqliteTable("participant_model_reviews", {
+  id: text("id").primaryKey(),
+  eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  entryId: text("entry_id").notNull().references(() => participantModelEntries.id),
+  action: text("action", { enum: ["confirmed", "corrected", "disputed"] }).notNull(),
+  replacementEntryId: text("replacement_entry_id").references(() => participantModelEntries.id),
+  note: text("note"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("participant_model_reviews_entry_idx").on(table.entryId, table.createdAt)]);
+
 export const learningSignals = sqliteTable("learning_signals", {
   id: text("id").primaryKey(),
   page: text("page").notNull(),
@@ -308,6 +319,31 @@ export const learningSignals = sqliteTable("learning_signals", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 }, (table) => [index("learning_signals_created_idx").on(table.createdAt)]);
+
+export const learningSignalEvidence = sqliteTable("learning_signal_evidence", {
+  id: text("id").primaryKey(),
+  signalId: text("signal_id").notNull().references(() => learningSignals.id),
+  promptEventId: text("prompt_event_id").notNull().references(() => promptEvents.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("learning_signal_evidence_unique").on(table.signalId, table.promptEventId),
+  index("learning_signal_evidence_signal_idx").on(table.signalId),
+]);
+
+export const promptClusters = sqliteTable("prompt_clusters", {
+  id: text("id").primaryKey(),
+  page: text("page").notNull(),
+  tutorialStep: text("tutorial_step"),
+  category: text("category").notNull(),
+  label: text("label").notNull(),
+  promptCount: integer("prompt_count").notNull(),
+  participantCount: integer("participant_count").notNull(),
+  errorCount: integer("error_count").notNull(),
+  examplesJson: text("examples_json").notNull(),
+  windowStartedAt: integer("window_started_at", { mode: "timestamp" }).notNull(),
+  windowEndedAt: integer("window_ended_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("prompt_clusters_created_idx").on(table.createdAt)]);
 
 export const eventConfiguration = sqliteTable("event_configuration", {
   id: text("id").primaryKey(),

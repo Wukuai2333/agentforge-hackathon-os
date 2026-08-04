@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -70,6 +70,12 @@ export async function GET(request: Request) {
       pe.anonymous_participant_id AS participantId,pe.page,pe.user_prompt AS userPrompt
       FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
       ORDER BY ev.created_at DESC LIMIT 100`).all(),
+    runtime.DB.prepare(`SELECT id,page,tutorial_step AS tutorialStep,category,label,prompt_count AS promptCount,
+      participant_count AS participantCount,error_count AS errorCount,examples_json AS examplesJson,
+      window_started_at AS windowStartedAt,window_ended_at AS windowEndedAt,created_at AS createdAt
+      FROM prompt_clusters ORDER BY created_at DESC LIMIT 50`).all(),
+    runtime.DB.prepare(`SELECT e.signal_id AS signalId,p.id AS promptEventId,p.user_prompt AS userPrompt,p.status,p.error_code AS errorCode,p.user_feedback AS userFeedback,p.created_at AS createdAt
+      FROM learning_signal_evidence e JOIN prompt_events p ON p.id=e.prompt_event_id ORDER BY e.created_at DESC LIMIT 200`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
@@ -79,6 +85,7 @@ export async function GET(request: Request) {
     feedbacks: safeFeedbacks,
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
+    promptClusters: promptClusters.results, signalEvidence: signalEvidence.results,
     promptEvaluations: promptEvaluations.results.map((row) => ({
       ...row, totalScore: row.totalScore ?? evaluationScore(row.evaluationJson),
       userPrompt: maskSensitive(String(row.userPrompt || "")),
@@ -88,7 +95,14 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { assistantEnabled?: boolean; defaultTeamTokenQuota?: number };
+  const input = await request.json() as { action?: string; signalId?: string; decision?: "approved" | "rejected" | "reviewing"; editedSummary?: string; suggestedAction?: string; assistantEnabled?: boolean; defaultTeamTokenQuota?: number };
+  if (input.action === "review_signal") {
+    if (!input.signalId || !input.decision) return Response.json({ error: "Signal and review decision are required." }, { status: 400 });
+    const result = await runtime.DB.prepare(`UPDATE learning_signals SET review_status=?,cognee_summary=COALESCE(?,cognee_summary),suggested_action=COALESCE(?,suggested_action),reviewed_at=? WHERE id=?`)
+      .bind(input.decision, input.editedSummary?.trim().slice(0, 12000) || null, input.suggestedAction?.trim().slice(0, 2000) || null, Date.now(), input.signalId).run();
+    if (!result.meta.changes) return Response.json({ error: "Learning signal not found." }, { status: 404 });
+    return Response.json({ saved: true, signalId: input.signalId, reviewStatus: input.decision });
+  }
   const enabled = input.assistantEnabled === false ? 0 : 1;
   const quota = Math.max(1000, Math.min(10000000, Number(input.defaultTeamTokenQuota) || 100000));
   await runtime.DB.prepare(`INSERT INTO organizer_settings (id, assistant_enabled, default_team_token_quota, updated_at)

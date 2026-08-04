@@ -1,5 +1,6 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
+import { syncPendingMemory } from "../../../lib/cognee-delivery";
 
 type AssistantInput = {
   prompt?: string;
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
   } finally {
     const occurredAt = Date.now();
     const memoryPayload = JSON.stringify({
-      schema_version: "agentforge.learning-event.v1", event_id: eventId, event_type: "assistant_prompt",
+      schema_version: "agentforge.learning-event.v1", event_id: eventId, hackathon_event_id: auth.account!.eventId, event_type: "assistant_prompt",
       participant_id: participantId, team_id: teamId, page, tutorial_step: tutorialStep,
       question: sanitizeForMemory(prompt), selected_context: sanitizeForMemory(selectedContext),
       assistant_response: sanitizeForMemory(answer || ""), status, error_code: errorCode,
@@ -151,6 +152,7 @@ export async function POST(request: Request) {
       ON CONFLICT(source_type, source_id) DO NOTHING`).bind(
       crypto.randomUUID(), eventId, "agentforge_learning_signals", memoryPayload, occurredAt,
     )]);
+    waitUntil(syncPendingMemory(runtime, 20));
   }
 }
 
@@ -185,5 +187,6 @@ export async function PATCH(request: Request) {
         occurred_at: new Date(createdAt).toISOString(), evidence_type: "participant_reported_fact",
       }), createdAt),
   ]);
+  waitUntil(syncPendingMemory(runtime as AssistantRuntime, 20));
   return Response.json({ saved: true, feedback, createdAt });
 }

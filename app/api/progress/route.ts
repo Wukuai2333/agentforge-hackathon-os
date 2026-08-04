@@ -1,5 +1,6 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
+import { syncPendingMemory } from "../../../lib/cognee-delivery";
 
 export async function GET(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
@@ -20,7 +21,8 @@ export async function POST(request: Request) {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO event_progress_events (id,event_participant_id,team_id,milestone,status,source,occurred_at) VALUES (?,?,?,?,?,'manual',?)").bind(id, auth.account!.participantId, auth.account!.teamId, milestone, status, now),
     env.DB.prepare(`INSERT INTO cognee_sync_outbox (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
-      VALUES (?,'progress_event',?,'agentforge_learning_signals',?,'pending',0,?)`).bind(crypto.randomUUID(), id, JSON.stringify({ schema_version: "agentforge.memory.v2", event_type: "progress_event", participant_id: auth.account!.participantId, team_id: auth.account!.teamId, milestone, status, source: "manual", occurred_at: new Date(now).toISOString(), evidence_type: "observed_fact" }), now),
+      VALUES (?,'progress_event',?,'agentforge_learning_signals',?,'pending',0,?)`).bind(crypto.randomUUID(), id, JSON.stringify({ schema_version: "agentforge.memory.v2", event_type: "progress_event", hackathon_event_id: auth.account!.eventId, participant_id: auth.account!.participantId, team_id: auth.account!.teamId, milestone, status, source: "manual", occurred_at: new Date(now).toISOString(), evidence_type: "observed_fact", memory_scope: auth.account!.teamId ? "team" : "participant" }), now),
   ]);
+  waitUntil(syncPendingMemory(env, 20));
   return Response.json({ event: { id, milestone, status, source: "manual", occurredAt: now } });
 }

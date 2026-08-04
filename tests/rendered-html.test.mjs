@@ -47,3 +47,22 @@ test("links authenticated identity to consent, team, project, prompt, progress, 
   assert.doesNotMatch(me, /export async function DELETE/);
   assert.match(migration, /event_progress_events/);
 });
+
+test("ships real team collaboration, transparent learning models, and evidence-linked Cognee operations", async () => {
+  const [portal, team, model, notes, delivery, cognee, organizer, migration] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/team/route.ts"), source("app/api/model/route.ts"), source("app/api/team-notes/route.ts"),
+    source("lib/cognee-delivery.ts"), source("app/api/cognee/route.ts"), source("app/api/organizer/route.ts"), source("drizzle/0012_team_model_learning_signals.sql"),
+  ]);
+  assert.match(portal, /REAL TEAM WORKSPACE/);
+  assert.match(portal, /TRANSPARENT PARTICIPANT MODEL/);
+  assert.match(team, /regenerate_invite/);
+  assert.match(notes, /expectedUpdatedAt/);
+  assert.match(model, /participant_model_reviews/);
+  assert.match(model, /superseded_by_id/);
+  assert.match(delivery, /attempts<5/);
+  assert.match(delivery, /participant_/);
+  assert.match(cognee, /prompt_clusters/);
+  assert.match(cognee, /learning_signal_evidence/);
+  assert.match(organizer, /review_signal/);
+  assert.match(migration, /participant_model_reviews/);
+});

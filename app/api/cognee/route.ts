@@ -43,24 +43,42 @@ export async function POST(request: Request) {
 
   if (input.action === "detect") {
     const end = Date.now(), start = end - 3600000;
-    const groups = await runtime.DB.prepare(`SELECT page, tutorial_step AS tutorialStep, COUNT(*) AS promptCount,
+    const groups = await runtime.DB.prepare(`SELECT page, tutorial_step AS tutorialStep,
+      CASE
+        WHEN error_code LIKE '%auth%' OR lower(user_prompt) LIKE '%api key%' OR lower(user_prompt) LIKE '%login%' THEN 'authentication'
+        WHEN lower(user_prompt) LIKE '%cognify%' OR lower(user_prompt) LIKE '%processing%' OR lower(user_prompt) LIKE '%finished%' OR lower(user_prompt) LIKE '%status%' THEN 'processing_status'
+        WHEN lower(user_prompt) LIKE '%dataset%' OR lower(user_prompt) LIKE '%memory%' OR lower(user_prompt) LIKE '%recall%' THEN 'memory_retrieval'
+        WHEN lower(user_prompt) LIKE '%clawmax%' OR lower(user_prompt) LIKE '%agent%' THEN 'agent_building'
+        WHEN status='error' THEN 'runtime_error'
+        ELSE 'general_question' END AS category,
+      COUNT(*) AS promptCount,
       COUNT(DISTINCT anonymous_participant_id) AS participantCount, SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errorCount,
-      SUM(CASE WHEN user_feedback='not_helpful' THEN 1 ELSE 0 END) AS negativeFeedbackCount
-      FROM prompt_events WHERE created_at BETWEEN ? AND ? GROUP BY page, tutorial_step`).bind(start, end).all();
-    let created = 0;
+      SUM(CASE WHEN user_feedback='not_helpful' THEN 1 ELSE 0 END) AS negativeFeedbackCount,
+      json_group_array(substr(user_prompt,1,240)) AS examplesJson
+      FROM prompt_events WHERE created_at BETWEEN ? AND ? GROUP BY page, tutorial_step, category`).bind(start, end).all();
+    let created = 0, clustersCreated = 0;
     for (const row of groups.results) {
       const prompts = Number(row.promptCount || 0), participants = Number(row.participantCount || 0);
       const errors = Number(row.errorCount || 0), negative = Number(row.negativeFeedbackCount || 0);
+      if (prompts >= 2) {
+        await runtime.DB.prepare(`INSERT INTO prompt_clusters
+          (id,page,tutorial_step,category,label,prompt_count,participant_count,error_count,examples_json,window_started_at,window_ended_at,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), String(row.page), row.tutorialStep || null, String(row.category), String(row.category).replaceAll("_", " "), prompts, participants, errors, String(row.examplesJson || "[]"), start, end, end).run();
+        clustersCreated++;
+      }
       if (!((prompts >= 15 && participants >= 5) || (prompts >= 5 && errors / prompts >= .2) || (prompts >= 5 && negative / prompts >= .25))) continue;
       const duplicate = await runtime.DB.prepare(`SELECT id FROM learning_signals WHERE page=? AND tutorial_step IS ? AND window_ended_at>? LIMIT 1`)
         .bind(String(row.page), row.tutorialStep || null, end - 1800000).first();
       if (duplicate) continue;
+      const signalId = crypto.randomUUID();
       await runtime.DB.prepare(`INSERT INTO learning_signals
         (id,page,tutorial_step,window_started_at,window_ended_at,prompt_count,participant_count,error_count,negative_feedback_count,detection_rule,review_status,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'detected',?)`).bind(crypto.randomUUID(), String(row.page), row.tutorialStep || null, start, end, prompts, participants, errors, negative, "threshold-v1", end).run();
+        VALUES (?,?,?,?,?,?,?,?,?,?,'detected',?)`).bind(signalId, String(row.page), row.tutorialStep || null, start, end, prompts, participants, errors, negative, `threshold-v2:${String(row.category)}`, end).run();
+      const evidence = await runtime.DB.prepare(`SELECT id FROM prompt_events WHERE page=? AND tutorial_step IS ? AND created_at BETWEEN ? AND ? ORDER BY (status='error') DESC,(user_feedback='not_helpful') DESC,created_at DESC LIMIT 5`).bind(String(row.page), row.tutorialStep || null, start, end).all();
+      if (evidence.results.length) await runtime.DB.batch(evidence.results.map((item) => runtime.DB.prepare("INSERT OR IGNORE INTO learning_signal_evidence (id,signal_id,prompt_event_id,created_at) VALUES (?,?,?,?)").bind(crypto.randomUUID(), signalId, String(item.id), end)));
       created++;
     }
-    return Response.json({ created, evaluatedGroups: groups.results.length });
+    return Response.json({ created, clustersCreated, evaluatedGroups: groups.results.length });
   }
 
   if (!runtime.COGNEE_API_KEY) return Response.json({ error: "COGNEE_API_KEY is not configured." }, { status: 503 });
