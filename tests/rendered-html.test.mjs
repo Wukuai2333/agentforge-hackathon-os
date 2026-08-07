@@ -153,3 +153,11 @@ test("manages registered users with server roles and enforces registration state
   assert.doesNotMatch(schema, /\["participant", "mentor", "organizer"\]/);
   assert.match(migration, /SET `role`='participant' WHERE `role`='mentor'/);
 });
+
+test("lets participants replace selected Ask AI context while the drawer stays open", async () => {
+  const [portal, styles] = await Promise.all([source("app/portal.tsx"), source("app/globals.css")]);
+  assert.match(portal, /closest\("input, textarea, button, a, \.assistant"\)/);
+  assert.match(portal, /Highlight different text on the page to replace this context/);
+  assert.match(styles, /\.assistant-backdrop[^}]*pointer-events:none/);
+  assert.match(styles, /\.assistant[^}]*pointer-events:auto/);
+});
