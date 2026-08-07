@@ -1,9 +1,63 @@
+import { env } from "cloudflare:workers";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
 export type AuthIdentity = {
   subject: string;
   email: string;
   displayName: string;
-  provider: "chatgpt";
+  provider: "chatgpt" | "supabase";
 };
+
+type AuthRuntime = { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string };
+const jwks = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+export function authRuntime() {
+  const runtime = env as unknown as AuthRuntime;
+  return {
+    url: runtime.SUPABASE_URL?.replace(/\/$/, "") || "",
+    publishableKey: runtime.SUPABASE_PUBLISHABLE_KEY || "",
+  };
+}
+
+function cookie(request: Request, name: string) {
+  const match = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
+}
+
+export function accessTokenFromRequest(request: Request) {
+  const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  return bearer || cookie(request, "agentforge_access_token");
+}
+
+export function refreshTokenFromRequest(request: Request) {
+  return cookie(request, "agentforge_refresh_token");
+}
+
+export async function identityFromSupabaseToken(token: string): Promise<AuthIdentity | null> {
+  const config = authRuntime();
+  if (!token || !config.url || !config.publishableKey) return null;
+  try {
+    let remote = jwks.get(config.url);
+    if (!remote) {
+      remote = createRemoteJWKSet(new URL(`${config.url}/auth/v1/.well-known/jwks.json`));
+      jwks.set(config.url, remote);
+    }
+    const { payload } = await jwtVerify(token, remote, { issuer: `${config.url}/auth/v1`, audience: "authenticated" });
+    const metadata = (payload.user_metadata || {}) as Record<string, unknown>;
+    const email = String(payload.email || "").trim().toLowerCase();
+    if (!payload.sub || !email) return null;
+    return { subject: payload.sub, email, displayName: String(metadata.full_name || metadata.display_name || metadata.name || email), provider: "supabase" };
+  } catch {
+    try {
+      const response = await fetch(`${config.url}/auth/v1/user`, { headers: { apikey: config.publishableKey, Authorization: `Bearer ${token}` } });
+      if (!response.ok) return null;
+      const user = await response.json() as { id?: string; email?: string; user_metadata?: Record<string, unknown> };
+      const email = String(user.email || "").trim().toLowerCase();
+      if (!user.id || !email) return null;
+      return { subject: user.id, email, displayName: String(user.user_metadata?.full_name || user.user_metadata?.display_name || user.user_metadata?.name || email), provider: "supabase" };
+    } catch { return null; }
+  }
+}
 
 export type CurrentAccount = {
   userId: string;
@@ -24,7 +78,9 @@ function decodeName(headers: Headers, email: string) {
   try { return decodeURIComponent(encoded); } catch { return email; }
 }
 
-export function identityFromRequest(request: Request): AuthIdentity | null {
+export async function identityFromRequest(request: Request): Promise<AuthIdentity | null> {
+  const accessToken = accessTokenFromRequest(request);
+  if (accessToken) return identityFromSupabaseToken(accessToken);
   const subject = request.headers.get("oai-authenticated-user-id")?.trim();
   const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
   if (!subject || !email) return null;
@@ -45,7 +101,7 @@ export async function currentAccount(db: D1Database, identity: AuthIdentity): Pr
 }
 
 export async function requireCurrentAccount(request: Request, db: D1Database) {
-  const identity = identityFromRequest(request);
+  const identity = await identityFromRequest(request);
   if (!identity) return { error: Response.json({ error: "Sign in is required." }, { status: 401 }), identity: null, account: null };
   const account = await currentAccount(db, identity);
   if (!account) return { error: Response.json({ error: "Complete event registration first." }, { status: 403 }), identity, account: null };

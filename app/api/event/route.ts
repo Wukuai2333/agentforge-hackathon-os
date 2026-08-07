@@ -4,7 +4,7 @@ import { currentAccount, identityFromRequest } from "../../../lib/account";
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string };
 const authorized = async (request: Request, runtime: Runtime) => {
   if (runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE) return true;
-  const identity = identityFromRequest(request);
+  const identity = await identityFromRequest(request);
   return identity ? (await currentAccount(runtime.DB, identity))?.role === "organizer" : false;
 };
 

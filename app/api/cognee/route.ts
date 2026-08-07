@@ -4,7 +4,7 @@ import { currentAccount, identityFromRequest } from "../../../lib/account";
 type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
 const allowed = async (request: Request, runtime: Runtime) => {
   if (runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE) return true;
-  const identity = identityFromRequest(request);
+  const identity = await identityFromRequest(request);
   return identity ? (await currentAccount(runtime.DB, identity))?.role === "organizer" : false;
 };
 const base = (runtime: Runtime) => (runtime.COGNEE_API_URL || "https://api.cognee.ai").replace(/\/$/, "");

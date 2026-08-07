@@ -111,3 +111,23 @@ test("uses Shared Space for team collaboration without renaming Cognee concepts"
   assert.doesNotMatch(portal, />Shared Brain</);
   assert.match(portal, /COGNEE SEMANTIC MEMORY/);
 });
+
+test("uses Supabase for real participant authentication without storing passwords in AgentForge", async () => {
+  const [portal, account, identity, session, password, config] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/account/route.ts"), source("lib/account.ts"),
+    source("app/api/auth/session/route.ts"), source("app/api/auth/password/route.ts"), source("app/api/auth/config/route.ts"),
+  ]);
+  assert.match(portal, /Create account/);
+  assert.match(portal, /Continue with Google/);
+  assert.match(portal, /Forgot password/);
+  assert.match(portal, /Passwords are handled by Supabase Auth/);
+  assert.match(identity, /jwtVerify/);
+  assert.match(identity, /identityFromSupabaseToken/);
+  assert.match(session, /HttpOnly; Secure; SameSite=Lax/);
+  assert.match(session, /grant_type=refresh_token/);
+  assert.match(password, /method: "PUT"/);
+  assert.match(config, /SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(account, /ORGANIZER_EMAILS/);
+  assert.match(account, /OR email=\?/);
+  assert.doesNotMatch(account + identity + session, /INSERT INTO .*password/i);
+});

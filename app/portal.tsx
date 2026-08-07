@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings";
 type PortalRole = "participant" | "mentor" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
-type InitialIdentity = { id: string; displayName: string; email: string; fullName: string | null };
 type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
@@ -52,6 +51,110 @@ const demoPrivacySections = [
   ["05 · Humans stay in the pull request", "Organizers may review prompts, errors, feedback, and learning signals to support participants and improve tutorials. Suggested tutorial changes require human review before publication. The system should never silently turn a model guess into a participant score, disciplinary decision, or final truth."],
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
+
+type AuthConfig = { enabled: boolean; url: string; publishableKey: string; googleEnabled: boolean };
+type SupabaseAuthResult = { access_token?: string; refresh_token?: string; expires_in?: number; user?: { id?: string }; error?: string; error_description?: string; msg?: string };
+
+async function endSession() {
+  try { await fetch("/api/auth/session", { method: "DELETE" }); } finally {
+    sessionStorage.removeItem("agentforge_organizer_code");
+    window.location.href = "/";
+  }
+}
+
+function AuthPanel({ eventName }: { eventName: string }) {
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [mode, setMode] = useState<"signup" | "signin" | "forgot" | "reset">("signup");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function establishSession(result: SupabaseAuthResult, recovery = false) {
+    if (!result.access_token) throw new Error("The identity provider did not return a session.");
+    const response = await fetch("/api/auth/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: result.access_token, refreshToken: result.refresh_token, expiresIn: result.expires_in }) });
+    const saved = await response.json() as { error?: string };
+    if (!response.ok) throw new Error(saved.error || "The secure session could not be created.");
+    if (recovery) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      setMode("reset"); setMessage("Choose a new password for your account.");
+    } else {
+      const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
+      window.localStorage.removeItem("agentforge_auth_return_to");
+      window.history.replaceState(null, "", `${window.location.pathname}${returnTo}`);
+      window.location.reload();
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const prepare = async () => {
+      try {
+        const response = await fetch("/api/auth/config");
+        const next = await response.json() as AuthConfig;
+        if (cancelled) return;
+        setConfig(next);
+        const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const accessToken = params.get("access_token");
+        if (accessToken) {
+          setBusy(true);
+          await establishSession({ access_token: accessToken, refresh_token: params.get("refresh_token") || undefined, expires_in: Number(params.get("expires_in") || 3600) }, params.get("type") === "recovery");
+        } else if (params.get("error_description")) setError(params.get("error_description") || "Authentication failed.");
+      } catch (problem) { if (!cancelled) setError(problem instanceof Error ? problem.message : "Authentication could not be prepared."); }
+      finally { if (!cancelled) setBusy(false); }
+    };
+    void prepare();
+    return () => { cancelled = true; };
+  // The callback is intentionally processed once when the auth surface opens.
+  }, []);
+
+  async function authRequest(kind: "signup" | "signin" | "forgot") {
+    if (!config?.enabled) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      if (!email.trim()) throw new Error("Enter your email address.");
+      if (kind !== "forgot" && password.length < 8) throw new Error("Use a password with at least 8 characters.");
+      if (kind === "signup" && password !== confirmPassword) throw new Error("The passwords do not match.");
+      if (kind === "signup" && !name.trim()) throw new Error("Enter the name your teammates should see.");
+      const redirectTo = `${window.location.origin}/`;
+      const endpoint = kind === "signup" ? `${config.url}/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}` : kind === "signin" ? `${config.url}/auth/v1/token?grant_type=password` : `${config.url}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
+      const body = kind === "signup" ? { email: email.trim(), password, data: { display_name: name.trim(), full_name: name.trim() } } : kind === "signin" ? { email: email.trim(), password } : { email: email.trim() };
+      const response = await fetch(endpoint, { method: "POST", headers: { apikey: config.publishableKey, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as SupabaseAuthResult;
+      if (!response.ok) throw new Error(result.error_description || result.msg || result.error || "Authentication failed.");
+      if (kind === "forgot") { setMessage("Check your email for a password-reset link."); return; }
+      if (result.access_token) await establishSession(result);
+      else setMessage("Check your email to verify your account, then return here to sign in.");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Authentication failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function resetPassword() {
+    setBusy(true); setError("");
+    try {
+      if (password.length < 8) throw new Error("Use a password with at least 8 characters.");
+      if (password !== confirmPassword) throw new Error("The passwords do not match.");
+      const response = await fetch("/api/auth/password", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Password could not be updated.");
+      setMessage("Password updated. Your event account is ready.");
+      window.setTimeout(() => window.location.reload(), 800);
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Password could not be updated."); }
+    finally { setBusy(false); }
+  }
+
+  function googleSignIn() {
+    if (!config?.enabled || !config.googleEnabled) return;
+    window.localStorage.setItem("agentforge_auth_return_to", window.location.hash || "#/home");
+    const redirectTo = `${window.location.origin}/`;
+    window.location.href = `${config.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  }
+
+  return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p><div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div><small>Passwords are handled by Supabase Auth and never enter AgentForge, D1, Cognee, or Prompt Tracking.</small></section><section className="auth-card supabase-auth"><span className="eyebrow">SECURE EVENT ACCOUNT</span><h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Choose a new password"}</h2>{!config ? <p>Preparing secure sign-in…</p> : !config.enabled ? <div className="auth-config-pending"><strong>Authentication setup is ready for configuration.</strong><p>Add the Supabase Project URL and Publishable Key before opening registration.</p></div> : <>{mode !== "reset" && <div className="auth-tabs"><button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}{mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}{mode !== "reset" && <label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>}{mode !== "forgot" && <label>{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" /></label>}{(mode === "signup" || mode === "reset") && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}{error && <p className="entry-error">{error}</p>}{message && <p className="auth-success">{message}</p>}{mode === "signup" && <button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}{mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}{mode === "forgot" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}{mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void resetPassword()}>{busy ? "Updating…" : "Update password →"}</button>}{mode !== "forgot" && mode !== "reset" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled={!config.googleEnabled || busy} onClick={googleSignIn}><b>G</b>{config.googleEnabled ? "Continue with Google" : "Google login awaiting organizer setup"}</button></>}<p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p></>}</section></div>;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function LegacyEntryFlow({ eventName, onComplete }: { eventName: string; onComplete: (user: PortalUser) => void }) {
@@ -130,9 +233,9 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
     finally { setSaving(false); }
   }
 
-  if (stage === "auth") return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Sign in once, then your consent, team, project, prompts, progress, and memory stay connected to one event identity.</p><div className="entry-flow-map"><span><b>1</b>Sign in</span><i>→</i><span><b>2</b>Consent</span><i>→</i><span><b>3</b>Team</span><i>→</i><span><b>4</b>Survey</span></div><small>The account structure is provider-neutral, so Google or email/password can be added later without migrating participant records.</small></section><section className="auth-card"><span className="eyebrow">EVENT ACCOUNT</span><h2>Sign in to continue</h2><p>Organizer access is assigned server-side. Participants continue through consent and project setup.</p><a className="primary auth-submit auth-link" href="/signin-with-chatgpt?return_to=%2F">Sign in securely →</a><p className="auth-disclaimer">AgentForge does not collect or store a password in this flow.</p></section></div>;
+  if (stage === "auth") return <AuthPanel eventName={eventName} />;
 
-  if (stage === "consent" && current) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This policy demonstrates the consent flow and still requires organizer and legal review.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>The policy version, exact choices, participant registration, and timestamp are stored together.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !consentChecks.every(Boolean)} onClick={async () => { const next = await accountAction("accept_consent", { choices: consentChecks }); if (next) setStage("team"); }}>{saving ? "Saving consent…" : "Agree & choose a team →"}</button><a className="consent-signout" href="/signout-with-chatgpt?return_to=%2F">I do not agree · sign out</a><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
+  if (stage === "consent" && current) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This policy demonstrates the consent flow and still requires organizer and legal review.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>The policy version, exact choices, participant registration, and timestamp are stored together.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !consentChecks.every(Boolean)} onClick={async () => { const next = await accountAction("accept_consent", { choices: consentChecks }); if (next) setStage("team"); }}>{saving ? "Saving consent…" : "Agree & choose a team →"}</button><button className="consent-signout" onClick={() => void endSession()}>I do not agree · sign out</button><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
 
   if (stage === "team" && current) return <div className="entry-survey team-entry"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>TEAM SETUP</small></span></div><span>ONE ACTIVE TEAM PER PERSON</span></header><main><section><span className="eyebrow">TEAM MEMBERSHIP</span><h1>Build with a team—or start solo.</h1><p>Create a team and share its invite code, or join an existing team. You can switch later; earlier membership records and event data remain available through the event.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create team</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join team</button></div><label>{teamMode === "create" ? "TEAM NAME" : "INVITE CODE"}<input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Example: Team Synapse" : "8-character code"} /></label>{error && <p className="entry-error">{error}</p>}<div className="entry-survey-actions"><button className="text-button" onClick={() => setStage("survey")}>Continue solo for now</button><button className="primary" disabled={saving || !teamValue.trim()} onClick={async () => { const next = await accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue }); if (next) setStage("survey"); }}>{saving ? "Saving…" : teamMode === "create" ? "Create team →" : "Join team →"}</button></div></section><aside><span>YOUR EVENT IDENTITY</span><div className="filled"><b>✓</b><span>{current.displayName}<small>{current.email}</small></span></div><div className="filled"><b>✓</b><span>Consent recorded<small>{current.consentVersion}</small></span></div><div><b>3</b><span>Team membership<small>Waiting for your choice</small></span></div></aside></main></div>;
 
@@ -154,14 +257,14 @@ function LiveEvent({ config }: { config: EventConfig | null }) {
   return <><div className={`event-chip live-countdown ${now >= start && now < end ? "is-live" : ""}`}><span className="live-dot" /> {label}<b>{start && end ? now >= end ? "Complete" : `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s` : "Set time"}</b></div>{config?.discordUrl && <a className="discord-link" href={config.discordUrl} target="_blank" rel="noreferrer">Join Discord ↗</a>}</>;
 }
 
-export function HackathonPortal({ identity }: { identity: InitialIdentity | null }) {
+export function HackathonPortal() {
   const [view, setView] = useState<View>("home");
   const viewHistoryInitialized = useRef(false);
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
   const [organizerParticipantMode, setOrganizerParticipantMode] = useState(false);
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [pendingAccount, setPendingAccount] = useState<PortalUser | null>(null);
-  const [entryReady, setEntryReady] = useState(!identity);
+  const [entryReady, setEntryReady] = useState(false);
   const [done, setDone] = useState<number[]>([]);
   const [assistant, setAssistant] = useState(false);
   const [assistantOpened, setAssistantOpened] = useState(false);
@@ -187,10 +290,12 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
   ];
 
   useEffect(() => {
-    if (!identity) return;
     let cancelled = false;
     const bootstrap = async () => {
       try {
+        // Refresh the secure Supabase session cookie when possible before
+        // resolving the participant's D1 event account.
+        await fetch("/api/auth/session", { cache: "no-store" });
         const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bootstrap" }) });
         const result = await response.json() as { account?: PortalUser };
         if (!response.ok || !result.account || cancelled) return;
@@ -200,7 +305,20 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
     };
     void bootstrap();
     return () => { cancelled = true; };
-  }, [identity]);
+  }, []);
+
+  useEffect(() => {
+    if (!portalUser) return;
+    const refresh = async () => {
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      if (response.status === 401) {
+        setPortalUser(null);
+        setPendingAccount(null);
+      }
+    };
+    const interval = window.setInterval(() => void refresh(), 45 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [portalUser]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -306,10 +424,7 @@ export function HackathonPortal({ identity }: { identity: InitialIdentity | null
     setView("admin");
   }
 
-  function signOut() {
-    sessionStorage.removeItem("agentforge_organizer_code");
-    window.location.href = "/signout-with-chatgpt?return_to=%2F";
-  }
+  function signOut() { void endSession(); }
 
   useEffect(() => {
     if (!portalUser || !perspectiveReady) return;

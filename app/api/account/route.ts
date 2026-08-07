@@ -21,14 +21,22 @@ async function ensureEvent(db: D1Database) {
 }
 
 async function bootstrap(request: Request, runtime: Runtime) {
-  const identity = identityFromRequest(request);
-  if (!identity) return Response.json({ authenticated: false, signInPath: "/signin-with-chatgpt?return_to=%2F" }, { status: 401 });
+  const identity = await identityFromRequest(request);
+  if (!identity) return Response.json({ authenticated: false, signInPath: "/" }, { status: 401 });
   const now = Date.now(), eventId = await ensureEvent(runtime.DB);
-  const existing = await runtime.DB.prepare("SELECT id,role FROM app_users WHERE identity_provider=? AND identity_subject=?").bind(identity.provider, identity.subject).first<{ id: string; role: "participant" | "mentor" | "organizer" }>();
+  // A verified Supabase identity may replace the former ChatGPT-host identity.
+  // Email fallback keeps the participant's existing event history instead of
+  // creating a duplicate account during the migration.
+  const existing = await runtime.DB.prepare(`SELECT id,role FROM app_users
+    WHERE (identity_provider=? AND identity_subject=?) OR email=?
+    ORDER BY CASE WHEN identity_provider=? AND identity_subject=? THEN 0 ELSE 1 END LIMIT 1`)
+    .bind(identity.provider, identity.subject, identity.email, identity.provider, identity.subject)
+    .first<{ id: string; role: "participant" | "mentor" | "organizer" }>();
   const role = existing?.role === "organizer" || organizers(runtime).has(identity.email) ? "organizer" : existing?.role || "participant";
   const userId = existing?.id || crypto.randomUUID();
   if (existing) {
-    await runtime.DB.prepare("UPDATE app_users SET email=?,display_name=?,role=?,updated_at=? WHERE id=?").bind(identity.email, identity.displayName, role, now, userId).run();
+    await runtime.DB.prepare("UPDATE app_users SET identity_provider=?,identity_subject=?,email=?,display_name=?,role=?,updated_at=? WHERE id=?")
+      .bind(identity.provider, identity.subject, identity.email, identity.displayName, role, now, userId).run();
   } else {
     await runtime.DB.prepare(`INSERT INTO app_users (id,identity_provider,identity_subject,email,display_name,role,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?)`).bind(userId, identity.provider, identity.subject, identity.email, identity.displayName, role, now, now).run();
@@ -39,7 +47,8 @@ async function bootstrap(request: Request, runtime: Runtime) {
       (id,event_id,user_id,identity_provider,identity_subject,email,display_name,role,status,consent_version,joined_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?, 'active',?,?,?)`).bind(crypto.randomUUID(), eventId, userId, identity.provider, identity.subject, identity.email, identity.displayName, role, role === "organizer" ? "organizer-access-v1" : "pending", now, now).run();
   } else {
-    await runtime.DB.prepare("UPDATE event_participants SET email=?,display_name=?,role=?,updated_at=? WHERE id=?").bind(identity.email, identity.displayName, role, now, registration.id).run();
+    await runtime.DB.prepare("UPDATE event_participants SET identity_provider=?,identity_subject=?,email=?,display_name=?,role=?,updated_at=? WHERE id=?")
+      .bind(identity.provider, identity.subject, identity.email, identity.displayName, role, now, registration.id).run();
   }
   return Response.json({ authenticated: true, account: await currentAccount(runtime.DB, identity) });
 }
