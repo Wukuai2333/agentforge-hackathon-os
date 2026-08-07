@@ -519,6 +519,24 @@ export function HackathonPortal() {
 }
 
 function Overview({ progress, setView }: { progress: number; setView: (view: View) => void }) {
+  const [team, setTeam] = useState<Pick<TeamOverview, "team" | "members" | "memories" | "questions"> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTeam() {
+      try {
+        const response = await fetch("/api/team");
+        if (!response.ok) return;
+        const result = await response.json() as TeamOverview;
+        if (!cancelled) setTeam(result);
+      } catch { /* The Shared Space remains available from its navigation item. */ }
+    }
+    void loadTeam();
+    const interval = window.setInterval(() => void loadTeam(), 10000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, []);
+
+  const teamName = team?.team?.name;
   return <>
     <div className="hero-grid">
       <article className="hero-card">
@@ -540,7 +558,7 @@ function Overview({ progress, setView }: { progress: number; setView: (view: Vie
       <button className="move-card accent-lime" onClick={() => setView("progress")}><span className="move-icon">✓</span><small>BUILD · MILESTONE 04</small><h4>Store your first<br />useful memory</h4><p>Prove recall with one test.</p><b>Open milestone →</b></button>
       <button className="move-card accent-orange" onClick={() => setView("demo")}><span className="move-icon">◇</span><small>PREP · MIDPOINT</small><h4>Define how you’ll<br />measure success</h4><p>Make improvement visible.</p><b>Create evaluation →</b></button>
     </div>
-    <article className="team-strip"><div><span className="team-logo">S</span><div><small>TEAM SYNAPSE</small><h4>Your shared space is active</h4></div></div><div className="team-stats"><span><b>3</b><small>MEMBERS</small></span><span><b>24</b><small>MEMORIES</small></span><span><b>7</b><small>QUESTIONS</small></span></div><button onClick={() => setView("team")}>Open shared space →</button></article>
+    <article className="team-strip"><div><span className="team-logo">{teamName?.[0]?.toUpperCase() || "S"}</span><div><small>{teamName || "SHARED SPACE"}</small><h4>{team ? teamName ? "Your shared space is active" : "Create or join a shared space" : "Loading shared space…"}</h4></div></div><div className="team-stats"><span><b>{teamName ? team.members.length : "—"}</b><small>MEMBERS</small></span><span><b>{teamName ? team.memories.length : "—"}</b><small>MEMORIES</small></span><span><b>{teamName ? team.questions.length : "—"}</b><small>QUESTIONS</small></span></div><button onClick={() => setView("team")}>Open shared space →</button></article>
   </>;
 }
 
