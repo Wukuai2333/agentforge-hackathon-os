@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string };
-const authorized = async (request: Request, runtime: Runtime) => {
-  if (runtime.ORGANIZER_ACCESS_CODE && request.headers.get("x-organizer-code") === runtime.ORGANIZER_ACCESS_CODE) return true;
+type Runtime = { DB: D1Database };
+const organizerAccount = async (request: Request, runtime: Runtime) => {
   const identity = await identityFromRequest(request);
-  return identity ? (await currentAccount(runtime.DB, identity))?.role === "organizer" : false;
+  if (!identity) return null;
+  const account = await currentAccount(runtime.DB, identity);
+  return account?.role === "organizer" ? account : null;
 };
 
 export async function GET(request: Request) {
@@ -19,26 +20,30 @@ export async function GET(request: Request) {
     action, created_at AS createdAt FROM event_announcement_history
     WHERE active=1 AND announcement_text IS NOT NULL
     ORDER BY created_at DESC LIMIT 100`).all();
-  if (!await authorized(request, runtime)) return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
-  const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role, ep.status,
-    ep.joined_at AS joinedAt, t.name AS teamName
+  if (!await organizerAccount(request, runtime)) {
+    if (new URL(request.url).searchParams.get("admin") === "1") return Response.json({ error: "Organizer access required." }, { status: 401 });
+    return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
+  }
+  const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role,
+    ep.consent_version AS consentVersion, ep.joined_at AS joinedAt, t.name AS teamName,
+    COALESCE((SELECT cr.status FROM consent_records cr WHERE cr.event_participant_id=ep.id ORDER BY cr.recorded_at DESC LIMIT 1),
+      CASE WHEN ep.consent_version='pending' THEN 'pending' ELSE 'accepted' END) AS consentStatus,
+    MAX(ep.updated_at,
+      COALESCE((SELECT MAX(pe.created_at) FROM prompt_events pe WHERE pe.anonymous_participant_id=ep.id),0),
+      COALESCE((SELECT MAX(pg.occurred_at) FROM event_progress_events pg WHERE pg.event_participant_id=ep.id),0),
+      COALESCE((SELECT MAX(fe.created_at) FROM assistant_feedback_events fe WHERE fe.anonymous_participant_id=ep.id),0)) AS lastActive
     FROM event_participants ep
     LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
     LEFT JOIN teams t ON t.id=tm.team_id
     ORDER BY ep.joined_at DESC LIMIT 500`).all();
-  const anonymous = await runtime.DB.prepare(`SELECT p.id, COALESCE(p.display_name,'Anonymous participant') AS displayName,
-    NULL AS email, 'participant' AS role, 'prototype' AS status, p.created_at AS joinedAt, t.name AS teamName
-    FROM participants p LEFT JOIN teams t ON t.id=p.team_id
-    WHERE NOT EXISTS (SELECT 1 FROM event_participants ep WHERE ep.id=p.id)
-    ORDER BY p.created_at DESC LIMIT 500`).all();
   const announcementHistory = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText, action, active,
     editor_name AS editorName, created_at AS createdAt FROM event_announcement_history ORDER BY created_at DESC LIMIT 100`).all();
-  return Response.json({ config, participants: [...participants.results, ...anonymous.results], announcementHistory: announcementHistory.results, publishedAnnouncements: publishedAnnouncements.results });
+  return Response.json({ config, participants: participants.results, announcementHistory: announcementHistory.results, publishedAnnouncements: publishedAnnouncements.results });
 }
 
 export async function PUT(request: Request) {
   const runtime = env as unknown as Runtime;
-  if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  if (!await organizerAccount(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
   const input = await request.json() as { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string; announcementText?: string; announcementActive?: boolean; registrationOpen?: boolean };
   const startsAt = Number(input.startsAt) || null, endsAt = Number(input.endsAt) || null;
   if (startsAt && endsAt && endsAt <= startsAt) return Response.json({ error: "End time must be after start time." }, { status: 400 });
@@ -62,4 +67,26 @@ export async function PUT(request: Request) {
   }
   await runtime.DB.batch(statements);
   return Response.json({ saved: true, updatedAt });
+}
+
+export async function PATCH(request: Request) {
+  const runtime = env as unknown as Runtime;
+  const organizer = await organizerAccount(request, runtime);
+  if (!organizer) return Response.json({ error: "Organizer access required." }, { status: 401 });
+  const input = await request.json() as { participantId?: string; role?: "participant" | "organizer" };
+  if (!input.participantId || !["participant", "organizer"].includes(input.role || "")) {
+    return Response.json({ error: "Participant and role are required." }, { status: 400 });
+  }
+  const target = await runtime.DB.prepare("SELECT id,user_id AS userId,role FROM event_participants WHERE id=?").bind(input.participantId).first<{ id: string; userId: string | null; role: string }>();
+  if (!target?.userId) return Response.json({ error: "Registered user not found." }, { status: 404 });
+  if (target.role === "organizer" && input.role === "participant") {
+    const count = await runtime.DB.prepare("SELECT COUNT(*) AS count FROM event_participants WHERE role='organizer'").first<{ count: number }>();
+    if (Number(count?.count || 0) <= 1) return Response.json({ error: "At least one Organizer must remain." }, { status: 409 });
+  }
+  const now = Date.now();
+  await runtime.DB.batch([
+    runtime.DB.prepare("UPDATE event_participants SET role=?,updated_at=? WHERE id=?").bind(input.role, now, target.id),
+    runtime.DB.prepare("UPDATE app_users SET role=?,updated_at=? WHERE id=?").bind(input.role, now, target.userId),
+  ]);
+  return Response.json({ saved: true, participantId: target.id, role: input.role, changedBy: organizer.participantId });
 }

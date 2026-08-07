@@ -1,11 +1,9 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; ORGANIZER_ACCESS_CODE?: string; COGNEE_API_KEY?: string };
+type Runtime = { DB: D1Database; COGNEE_API_KEY?: string };
 
 async function authorized(request: Request, runtime: Runtime) {
-  const supplied = request.headers.get("x-organizer-code") || "";
-  if (runtime.ORGANIZER_ACCESS_CODE && supplied === runtime.ORGANIZER_ACCESS_CODE) return true;
   const identity = await identityFromRequest(request);
   if (!identity) return false;
   return (await currentAccount(runtime.DB, identity))?.role === "organizer";

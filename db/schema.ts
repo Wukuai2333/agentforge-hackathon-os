@@ -19,7 +19,7 @@ export const appUsers = sqliteTable("app_users", {
   identitySubject: text("identity_subject").notNull(),
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
-  role: text("role", { enum: ["participant", "mentor", "organizer"] }).notNull().default("participant"),
+  role: text("role", { enum: ["participant", "organizer"] }).notNull().default("participant"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 }, (table) => [
@@ -35,7 +35,7 @@ export const eventParticipants = sqliteTable("event_participants", {
   identitySubject: text("identity_subject"),
   email: text("email"),
   displayName: text("display_name").notNull(),
-  role: text("role", { enum: ["participant", "mentor", "organizer"] }).notNull().default("participant"),
+  role: text("role", { enum: ["participant", "organizer"] }).notNull().default("participant"),
   status: text("status", { enum: ["invited", "active", "suspended", "left"] }).notNull().default("active"),
   consentVersion: text("consent_version").notNull(),
   joinedAt: integer("joined_at", { mode: "timestamp" }).notNull(),

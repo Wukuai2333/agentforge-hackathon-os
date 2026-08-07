@@ -65,7 +65,7 @@ export type CurrentAccount = {
   eventId: string;
   displayName: string;
   email: string;
-  role: "participant" | "mentor" | "organizer";
+  role: "participant" | "organizer";
   consentVersion: string;
   teamId: string | null;
   teamName: string | null;

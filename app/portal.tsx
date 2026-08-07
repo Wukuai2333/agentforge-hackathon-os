@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings";
-type PortalRole = "participant" | "mentor" | "organizer";
+type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
 
@@ -52,12 +52,11 @@ const demoPrivacySections = [
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
 
-type AuthConfig = { enabled: boolean; url: string; publishableKey: string; googleEnabled: boolean };
+type AuthConfig = { enabled: boolean; url: string; publishableKey: string; googleEnabled: boolean; registrationOpen: boolean };
 type SupabaseAuthResult = { access_token?: string; refresh_token?: string; expires_in?: number; user?: { id?: string }; error?: string; error_description?: string; msg?: string };
 
 async function endSession() {
   try { await fetch("/api/auth/session", { method: "DELETE" }); } finally {
-    sessionStorage.removeItem("agentforge_organizer_code");
     window.location.href = "/";
   }
 }
@@ -97,6 +96,7 @@ function AuthPanel({ eventName }: { eventName: string }) {
         const next = await response.json() as AuthConfig;
         if (cancelled) return;
         setConfig(next);
+        if (!next.registrationOpen) setMode("signin");
         const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         const accessToken = params.get("access_token");
         if (accessToken) {
@@ -117,6 +117,7 @@ function AuthPanel({ eventName }: { eventName: string }) {
     try {
       if (!email.trim()) throw new Error("Enter your email address.");
       if (kind !== "forgot" && password.length < 8) throw new Error("Use a password with at least 8 characters.");
+      if (kind === "signup" && !config.registrationOpen) throw new Error("Registration is currently closed. Existing participants can still sign in.");
       if (kind === "signup" && password !== confirmPassword) throw new Error("The passwords do not match.");
       if (kind === "signup" && !name.trim()) throw new Error("Enter the name your teammates should see.");
       const redirectTo = `${window.location.origin}/`;
@@ -153,7 +154,7 @@ function AuthPanel({ eventName }: { eventName: string }) {
     window.location.href = `${config.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
   }
 
-  return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p><div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div><small>Passwords are handled by Supabase Auth and never enter AgentForge, D1, Cognee, or Prompt Tracking.</small></section><section className="auth-card supabase-auth"><span className="eyebrow">SECURE EVENT ACCOUNT</span><h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Choose a new password"}</h2>{!config ? <p>Preparing secure sign-in…</p> : !config.enabled ? <div className="auth-config-pending"><strong>Authentication setup is ready for configuration.</strong><p>Add the Supabase Project URL and Publishable Key before opening registration.</p></div> : <>{mode !== "reset" && <div className="auth-tabs"><button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}{mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}{mode !== "reset" && <label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>}{mode !== "forgot" && <label>{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" /></label>}{(mode === "signup" || mode === "reset") && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}{error && <p className="entry-error">{error}</p>}{message && <p className="auth-success">{message}</p>}{mode === "signup" && <button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}{mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}{mode === "forgot" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}{mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void resetPassword()}>{busy ? "Updating…" : "Update password →"}</button>}{mode !== "forgot" && mode !== "reset" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled={!config.googleEnabled || busy} onClick={googleSignIn}><b>G</b>{config.googleEnabled ? "Continue with Google" : "Google login awaiting organizer setup"}</button></>}<p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p></>}</section></div>;
+  return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p><div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div><small>Passwords are handled by Supabase Auth and never enter AgentForge, D1, Cognee, or Prompt Tracking.</small></section><section className="auth-card supabase-auth"><span className="eyebrow">SECURE EVENT ACCOUNT</span><h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Choose a new password"}</h2>{!config ? <p>Preparing secure sign-in…</p> : !config.enabled ? <div className="auth-config-pending"><strong>Authentication setup is ready for configuration.</strong><p>Add the Supabase Project URL and Publishable Key before opening registration.</p></div> : <>{!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}{mode !== "reset" && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}{mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}{mode !== "reset" && <label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>}{mode !== "forgot" && <label>{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" /></label>}{(mode === "signup" || mode === "reset") && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}{error && <p className="entry-error">{error}</p>}{message && <p className="auth-success">{message}</p>}{mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void authRequest("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}{mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}{mode === "forgot" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}{mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void resetPassword()}>{busy ? "Updating…" : "Update password →"}</button>}{mode !== "forgot" && mode !== "reset" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled={!config.googleEnabled || busy} onClick={googleSignIn}><b>G</b>{config.googleEnabled ? "Continue with Google" : "Google login awaiting organizer setup"}</button></>}<p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p></>}</section></div>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -831,7 +832,7 @@ type OrganizerData = {
   promptEvaluations: Array<{ id: string; promptEventId: string; rubricVersion: string; evaluator: string; evaluationJson: string; totalScore?: number | null; createdAt: number; participantId: string; page: string; tutorialStep?: string; userPrompt: string; parentPromptEventId?: string; parentPrompt?: string; outcomeStatus?: string; outcomeEvidence?: string }>;
 };
 
-type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: string; status: string; joinedAt: number; teamName?: string | null };
+type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: "participant" | "organizer"; consentVersion: string; consentStatus: "accepted" | "withdrawn" | "pending"; joinedAt: number; lastActive: number; teamName?: string | null };
 type AnnouncementHistoryItem = { id: string; announcementText?: string | null; action: "published" | "updated" | "withdrawn"; active: number | boolean; editorName: string; createdAt: number };
 const toLocalInput = (value?: number | null) => value ? new Date(Number(value) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 type PromptEvaluationView = { scores: Record<string, number>; totalScore?: number; maxScore?: number; grade?: string; coachingStatus?: string; strengths: string[]; weaknesses: string[]; improvedPrompt?: string; summary?: string; evidenceUsed: string[]; evidenceMissing: string[]; inferenceNotice?: string };
@@ -889,8 +890,6 @@ function PromptEvaluationCard({ item }: { item: OrganizerData["promptEvaluations
 }
 
 function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
-  const [code, setCode] = useState("");
-  const [accessCode, setAccessCode] = useState("account");
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
   const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
   const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(true);
@@ -899,35 +898,44 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function open(candidate = accessCode) {
-    if (!candidate) return;
+  async function open() {
     setError("");
-    const response = await fetch("/api/event", { headers: { "x-organizer-code": candidate } });
+    const response = await fetch("/api/event?admin=1");
     const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
-    if (!response.ok) { setError(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Event management could not be loaded."); return; }
-    setAccessCode(candidate); setCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setParticipants(result.participants || []); setAnnouncementHistory(result.announcementHistory || []);
+    if (!response.ok) { setError(response.status === 401 ? "Your account does not have Organizer access." : result.error || "Event management could not be loaded."); return; }
+    setParticipants(result.participants || []); setAnnouncementHistory(result.announcementHistory || []);
     if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
-  useEffect(() => { const timer = window.setTimeout(() => void open("account"), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const timer = window.setTimeout(() => void open(), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setSaving(true); setError("");
     const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, announcementText: form.announcementText, announcementActive: form.announcementActive, announcementUpdatedAt: Date.now(), registrationOpen: form.registrationOpen };
     try {
-      const response = await fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify(next) });
+      const response = await fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "Event settings could not be saved.");
       onSaved(next);
-      await open(accessCode);
+      await open();
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Event settings could not be saved."); }
     finally { setSaving(false); }
   }
 
-  if (!accessCode) return <div className="organizer-login"><span className="service-mark purple">◷</span><span className="eyebrow">PROTECTED EVENT MANAGEMENT</span><h2>Manage the live event.</h2><p>Use the same Organizer Access Code as the Prompt & Memory portal.</p><label>ORGANIZER ACCESS CODE<input type="password" value={code} onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void open(code); }} /></label>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void open(code)} disabled={!code}>Open event management</button></div>;
+  async function updateRole(participant: RegisteredParticipant, role: RegisteredParticipant["role"]) {
+    if (participant.role === role) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/event", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: participant.id, role }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "The user role could not be changed.");
+      setParticipants((items) => items.map((item) => item.id === participant.id ? { ...item, role } : item));
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "The user role could not be changed."); }
+    finally { setSaving(false); }
+  }
 
   const query = search.trim().toLowerCase();
-  const filtered = participants.filter((participant) => [participant.displayName, participant.email, participant.role, participant.status, participant.teamName].some((value) => String(value || "").toLowerCase().includes(query)));
+  const filtered = participants.filter((participant) => [participant.displayName, participant.email, participant.role, participant.teamName, participant.consentStatus, participant.consentVersion].some((value) => String(value || "").toLowerCase().includes(query)));
   return <div className="event-management">
     <div className="live-admin-head"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Event Management</h2><p>Controls the public countdown, announcements, Discord destination, registration state, and participant directory.</p></div><span className="pill on-track">Real event data</span></div>
     <div className="event-management-grid">
@@ -937,17 +945,16 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
         <label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
         <label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label>
         <div className="announcement-editor"><div className="announcement-editor-title"><span>WEBSITE ANNOUNCEMENT</span><button type="button" onClick={() => setShowAnnouncementHistory((visible) => !visible)}>{showAnnouncementHistory ? "Hide history" : `View history (${announcementHistory.filter((item) => item.active).length})`}</button></div><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small>{showAnnouncementHistory && <div className="announcement-history">{announcementHistory.filter((item) => item.active).length ? announcementHistory.filter((item) => item.active).map((item) => <article key={item.id}><header><span className="pill on-track">{item.action}</span><small>{new Date(item.createdAt).toLocaleString()} · {item.editorName}</small></header><p>{item.announcementText}</p></article>) : <p className="notes-empty">No announcements have been published yet.</p>}</div>}</div>
-        <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>Shown here now; enforcement will connect to the registration flow.</small></span></label>
+        <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>When closed, new accounts cannot enter the event. Existing Participants and Organizers can still sign in.</small></span></label>
         {error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : form.announcementActive ? "Save & publish" : "Save event settings"}</button>
       </section>
       <aside className="event-preview-card"><span>PARTICIPANT PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} />{form.announcementActive && form.announcementText && <div className="announcement-preview"><b>EVENT ANNOUNCEMENT</b><p>{form.announcementText}</p></div>}<p>The countdown and announcement use saved event data. No AI or tokens are used.</p></aside>
     </div>
-    <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} records · authenticated registrations and current prototype participants</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="participant-table"><div className="participant-row heading"><span>NAME</span><span>EMAIL</span><span>ROLE</span><span>TEAM</span><span>STATUS</span><span>JOINED</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><strong>{participant.displayName}</strong><span>{participant.email || "Not collected"}</span><span>{participant.role}</span><span>{participant.teamName || "Unassigned"}</span><span className={`pill ${participant.status === "active" ? "on-track" : "needs-help"}`}>{participant.status}</span><span>{new Date(participant.joinedAt).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
+    <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} authenticated event accounts · roles are enforced by the server</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{error && <p className="form-error directory-error">{error}</p>}<div className="participant-table user-management-table"><div className="participant-row heading"><span>USER</span><span>ROLE</span><span>TEAM</span><span>CONSENT</span><span>JOINED</span><span>LAST ACTIVE</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><span className="participant-identity"><strong>{participant.displayName}</strong><small>{participant.email || "Not collected"}</small></span><select aria-label={`Role for ${participant.displayName}`} value={participant.role} disabled={saving} onChange={(event) => void updateRole(participant, event.target.value as RegisteredParticipant["role"])}><option value="participant">Participant</option><option value="organizer">Organizer</option></select><span>{participant.teamName || "Unassigned"}</span><span><b className={`pill ${participant.consentStatus === "accepted" ? "on-track" : "needs-help"}`}>{participant.consentStatus}</b><small className="consent-version">{participant.consentVersion}</small></span><span>{new Date(participant.joinedAt).toLocaleString()}</span><span>{new Date(participant.lastActive).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
   </div>;
 }
 
 function Admin() {
-  const [accessCode, setAccessCode] = useState("account");
   const [data, setData] = useState<OrganizerData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -955,29 +962,27 @@ function Admin() {
   const [cogneeNotice, setCogneeNotice] = useState("");
   const [selectedPrompt, setSelectedPrompt] = useState<OrganizerData["prompts"][number] | null>(null);
 
-  async function loadOrganizer(candidate = accessCode) {
-    if (!candidate) return;
+  async function loadOrganizer() {
     setLoading(true); setError("");
     try {
-      const response = await fetch("/api/organizer", { headers: { "x-organizer-code": candidate } });
+      const response = await fetch("/api/organizer");
       const result = await response.json() as OrganizerData & { error?: string };
-      if (!response.ok) throw new Error(response.status === 401 ? "Organizer code false. Please enter the correct access code." : result.error || "Organizer data could not be loaded.");
-      setAccessCode(candidate); sessionStorage.setItem("agentforge_organizer_code", candidate); setData(result);
+      if (!response.ok) throw new Error(response.status === 401 ? "Your account does not have Organizer access." : result.error || "Organizer data could not be loaded.");
+      setData(result);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Organizer access failed."); }
     finally { setLoading(false); }
   }
 
-  // Restore an organizer session once on mount; subsequent refreshes use the explicit controls.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { const timer = window.setTimeout(() => void loadOrganizer("account"), 0); return () => window.clearTimeout(timer); }, []);
+  // Load once on mount; every request is authorized by the signed-in role.
+  useEffect(() => { const timer = window.setTimeout(() => void loadOrganizer(), 0); return () => window.clearTimeout(timer); }, []);
 
   async function updateSettings(assistantEnabled: boolean, quota = data?.settings.defaultTeamTokenQuota || 100000) {
-    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ assistantEnabled, defaultTeamTokenQuota: quota }) });
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assistantEnabled, defaultTeamTokenQuota: quota }) });
     if (response.ok) await loadOrganizer();
   }
 
   async function reviewSignal(signalId: string, decision: "approved" | "rejected" | "reviewing", editedSummary?: string, suggestedAction?: string) {
-    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ action: "review_signal", signalId, decision, editedSummary, suggestedAction }) });
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "review_signal", signalId, decision, editedSummary, suggestedAction }) });
     if (response.ok) await loadOrganizer(); else setError("Learning signal review could not be saved.");
   }
 
@@ -990,14 +995,14 @@ function Admin() {
   }
 
   async function deletePrompt(id: string) {
-    const response = await fetch(`/api/organizer?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-organizer-code": accessCode } });
+    const response = await fetch(`/api/organizer?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) { setSelectedPrompt(null); await loadOrganizer(); }
   }
 
   async function runCognee(action: "detect" | "sync" | "analyze" | "seed_tutorials" | "backfill_all" | "grade_prompts", signalId?: string) {
     setCogneeAction(signalId ? `${action}:${signalId}` : action); setError(""); setCogneeNotice("");
     try {
-      const response = await fetch("/api/cognee", { method: "POST", headers: { "Content-Type": "application/json", "x-organizer-code": accessCode }, body: JSON.stringify({ action, signalId }) });
+      const response = await fetch("/api/cognee", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, signalId }) });
       const result = await response.json() as { error?: string; queued?: number; skipped?: number; examined?: number; synced?: number; graded?: number; created?: number; message?: string; nextStep?: string };
       if (!response.ok) throw new Error(result.error || "Cognee action failed.");
       const label = action === "seed_tutorials" ? "Tutorial memory checked" : action === "backfill_all" ? "Historical data checked" : action === "sync" ? "Cognee sync completed" : action === "grade_prompts" ? "Prompt evaluation completed" : action === "detect" ? "Learning-signal detection completed" : "Cognee analysis completed";
@@ -1016,7 +1021,7 @@ function Admin() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "agentforge-prompt-events.csv"; link.click(); URL.revokeObjectURL(url);
   }
 
-  if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>{loading ? "Opening the control room…" : "Organizer access required."}</h2><p>Access is checked from the signed-in account role on the server.</p>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer("account")} disabled={loading}>{loading ? "Loading…" : "Retry"}</button></div>;
+  if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>{loading ? "Opening the control room…" : "Organizer access required."}</h2><p>Access is checked from the signed-in account role on the server.</p>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer()} disabled={loading}>{loading ? "Loading…" : "Retry"}</button></div>;
 
   const totalTokens = Number(data.summary.inputTokens) + Number(data.summary.outputTokens);
   const quota = Number(data.settings.defaultTeamTokenQuota);

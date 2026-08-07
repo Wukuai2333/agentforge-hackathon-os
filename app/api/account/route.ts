@@ -31,9 +31,16 @@ async function bootstrap(request: Request, runtime: Runtime) {
     WHERE (identity_provider=? AND identity_subject=?) OR email=?
     ORDER BY CASE WHEN identity_provider=? AND identity_subject=? THEN 0 ELSE 1 END LIMIT 1`)
     .bind(identity.provider, identity.subject, identity.email, identity.provider, identity.subject)
-    .first<{ id: string; role: "participant" | "mentor" | "organizer" }>();
-  const role = existing?.role === "organizer" || organizers(runtime).has(identity.email) ? "organizer" : existing?.role || "participant";
+    .first<{ id: string; role: "participant" | "organizer" }>();
+  // The database is authoritative after first registration. The email allowlist
+  // only bootstraps the first Organizer account for a new installation.
+  const role = existing ? (existing.role === "organizer" ? "organizer" : "participant") : organizers(runtime).has(identity.email) ? "organizer" : "participant";
   const userId = existing?.id || crypto.randomUUID();
+  const registrationOpen = await runtime.DB.prepare("SELECT registration_open AS registrationOpen FROM event_configuration WHERE id='primary'").first<{ registrationOpen: number }>();
+  const registration = existing ? await runtime.DB.prepare("SELECT id FROM event_participants WHERE event_id=? AND user_id=?").bind(eventId, userId).first<{ id: string }>() : null;
+  if (!registration && registrationOpen?.registrationOpen === 0 && role !== "organizer") {
+    return Response.json({ error: "Registration is currently closed. Existing participants can still sign in." }, { status: 403 });
+  }
   if (existing) {
     await runtime.DB.prepare("UPDATE app_users SET identity_provider=?,identity_subject=?,email=?,display_name=?,role=?,updated_at=? WHERE id=?")
       .bind(identity.provider, identity.subject, identity.email, identity.displayName, role, now, userId).run();
@@ -41,7 +48,6 @@ async function bootstrap(request: Request, runtime: Runtime) {
     await runtime.DB.prepare(`INSERT INTO app_users (id,identity_provider,identity_subject,email,display_name,role,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?)`).bind(userId, identity.provider, identity.subject, identity.email, identity.displayName, role, now, now).run();
   }
-  const registration = await runtime.DB.prepare("SELECT id FROM event_participants WHERE event_id=? AND user_id=?").bind(eventId, userId).first<{ id: string }>();
   if (!registration) {
     await runtime.DB.prepare(`INSERT INTO event_participants
       (id,event_id,user_id,identity_provider,identity_subject,email,display_name,role,status,consent_version,joined_at,updated_at)
