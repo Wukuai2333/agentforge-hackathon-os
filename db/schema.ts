@@ -251,6 +251,15 @@ export const organizerSettings = sqliteTable("organizer_settings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+export const organizerAccessGrants = sqliteTable("organizer_access_grants", {
+  email: text("email").primaryKey(),
+  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
+  grantedByParticipantId: text("granted_by_participant_id"),
+  grantedByName: text("granted_by_name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("organizer_access_grants_status_idx").on(table.status, table.updatedAt)]);
+
 // Durable delivery queue: operational events remain authoritative in D1 while
 // sanitized semantic records are delivered to Cognee independently.
 export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {

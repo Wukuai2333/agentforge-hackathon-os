@@ -865,6 +865,7 @@ type OrganizerData = {
 };
 
 type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: "participant" | "organizer"; consentVersion: string; consentStatus: "accepted" | "withdrawn" | "pending"; joinedAt: number; lastActive: number; teamName?: string | null };
+type OrganizerGrant = { email: string; status: "active" | "revoked"; grantedByName: string; createdAt: number; updatedAt: number };
 type AnnouncementHistoryItem = { id: string; announcementText?: string | null; action: "published" | "updated" | "withdrawn"; active: number | boolean; editorName: string; createdAt: number };
 const toLocalInput = (value?: number | null) => value ? new Date(Number(value) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 type PromptEvaluationView = { scores: Record<string, number>; totalScore?: number; maxScore?: number; grade?: string; coachingStatus?: string; strengths: string[]; weaknesses: string[]; improvedPrompt?: string; summary?: string; evidenceUsed: string[]; evidenceMissing: string[]; inferenceNotice?: string };
@@ -923,6 +924,12 @@ function PromptEvaluationCard({ item }: { item: OrganizerData["promptEvaluations
 
 function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
+  const [organizerGrants, setOrganizerGrants] = useState<OrganizerGrant[]>([]);
+  const [serverOrganizerEmails, setServerOrganizerEmails] = useState<string[]>([]);
+  const [currentOrganizerParticipantId, setCurrentOrganizerParticipantId] = useState("");
+  const [organizerEmail, setOrganizerEmail] = useState("");
+  const [organizerSearch, setOrganizerSearch] = useState("");
+  const [organizerNotice, setOrganizerNotice] = useState("");
   const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
   const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(true);
   const [search, setSearch] = useState("");
@@ -933,9 +940,9 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   async function open() {
     setError("");
     const response = await fetch("/api/event?admin=1");
-    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
+    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; organizerGrants?: OrganizerGrant[]; serverOrganizerEmails?: string[]; currentOrganizerParticipantId?: string; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
     if (!response.ok) { setError(response.status === 401 ? "Your account does not have Organizer access." : result.error || "Event management could not be loaded."); return; }
-    setParticipants(result.participants || []); setAnnouncementHistory(result.announcementHistory || []);
+    setParticipants(result.participants || []); setOrganizerGrants(result.organizerGrants || []); setServerOrganizerEmails(result.serverOrganizerEmails || []); setCurrentOrganizerParticipantId(result.currentOrganizerParticipantId || ""); setAnnouncementHistory(result.announcementHistory || []);
     if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
@@ -962,12 +969,44 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "The user role could not be changed.");
       setParticipants((items) => items.map((item) => item.id === participant.id ? { ...item, role } : item));
+      setOrganizerNotice(role === "organizer" ? `${participant.displayName} now has Organizer access.` : `${participant.displayName} is now a Participant.`);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "The user role could not be changed."); }
+    finally { setSaving(false); }
+  }
+
+  async function grantOrganizer() {
+    setSaving(true); setError(""); setOrganizerNotice("");
+    try {
+      const response = await fetch("/api/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: organizerEmail }) });
+      const result = await response.json() as { error?: string; registered?: boolean; email?: string };
+      if (!response.ok) throw new Error(result.error || "Organizer access could not be added.");
+      setOrganizerEmail("");
+      setOrganizerNotice(result.registered ? `${result.email} now has Organizer access.` : `${result.email} is pre-authorized and will become an Organizer after first sign-in.`);
+      await open();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Organizer access could not be added."); }
+    finally { setSaving(false); }
+  }
+
+  async function revokeOrganizer(email: string) {
+    if (!window.confirm(`Remove Organizer access for ${email}?`)) return;
+    setSaving(true); setError(""); setOrganizerNotice("");
+    try {
+      const response = await fetch("/api/event", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Organizer access could not be removed.");
+      setOrganizerNotice(`${email} no longer has Organizer access.`);
+      await open();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Organizer access could not be removed."); }
     finally { setSaving(false); }
   }
 
   const query = search.trim().toLowerCase();
   const filtered = participants.filter((participant) => [participant.displayName, participant.email, participant.role, participant.teamName, participant.consentStatus, participant.consentVersion].some((value) => String(value || "").toLowerCase().includes(query)));
+  const activeOrganizers = participants.filter((participant) => participant.role === "organizer");
+  const activeOrganizerEmails = new Set(activeOrganizers.map((participant) => participant.email?.toLowerCase()).filter(Boolean));
+  const pendingGrantEmails = [...new Set([...serverOrganizerEmails, ...organizerGrants.filter((grant) => grant.status === "active").map((grant) => grant.email)])].filter((email) => !activeOrganizerEmails.has(email.toLowerCase()));
+  const candidateQuery = organizerSearch.trim().toLowerCase();
+  const organizerCandidates = participants.filter((participant) => participant.role === "participant" && (!candidateQuery || [participant.displayName, participant.email, participant.teamName].some((value) => String(value || "").toLowerCase().includes(candidateQuery)))).slice(0, 8);
   return <div className="event-management">
     <div className="live-admin-head"><div><span className="eyebrow">LIVE OPERATIONS</span><h2>Event Management</h2><p>Controls the public countdown, announcements, Discord destination, registration state, and participant directory.</p></div><span className="pill on-track">Real event data</span></div>
     <div className="event-management-grid">
@@ -982,6 +1021,11 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
       </section>
       <aside className="event-preview-card"><span>PARTICIPANT PREVIEW</span><LiveEvent config={{ ...config, ...form, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null }} />{form.announcementActive && form.announcementText && <div className="announcement-preview"><b>EVENT ANNOUNCEMENT</b><p>{form.announcementText}</p></div>}<p>The countdown and announcement use saved event data. No AI or tokens are used.</p></aside>
     </div>
+    <section className="organizer-management"><div className="table-title"><div><span className="eyebrow">SERVER-ENFORCED ACCESS</span><h3>Organizer Management</h3><p>Add an email before signup, promote a registered Participant, or remove Organizer access. At least one Organizer must remain.</p></div><span className="organizer-count"><strong>{activeOrganizers.length}</strong> active</span></div>
+      {organizerNotice && <p className="organizer-notice">{organizerNotice}</p>}{error && <p className="form-error organizer-error">{error}</p>}
+      <div className="organizer-management-grid"><div className="organizer-roster"><h4>Current Organizers</h4>{activeOrganizers.length ? activeOrganizers.map((participant) => { const email = participant.email?.toLowerCase() || ""; const protectedOrganizer = serverOrganizerEmails.includes(email); return <article key={participant.id}><span className="organizer-avatar">{participant.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{participant.displayName}{participant.id === currentOrganizerParticipantId ? " · You" : ""}</strong><small>{participant.email || "Email unavailable"}</small><em>{participant.teamName || "No participant team"} · joined {new Date(participant.joinedAt).toLocaleDateString()}</em></div><span className={`access-source ${protectedOrganizer ? "protected" : "managed"}`}>{protectedOrganizer ? "SERVER PROTECTED" : "MANAGED HERE"}</span><button className="outline-button danger" disabled={saving || protectedOrganizer || activeOrganizers.length <= 1} title={protectedOrganizer ? "This email is protected by the server allowlist." : activeOrganizers.length <= 1 ? "At least one Organizer must remain." : "Remove Organizer access"} onClick={() => void revokeOrganizer(email)}>Remove access</button></article>; }) : <p className="notes-empty">No Organizer accounts are registered yet.</p>}{pendingGrantEmails.length > 0 && <div className="pending-organizers"><span>PENDING FIRST SIGN-IN</span>{pendingGrantEmails.map((email) => { const protectedOrganizer = serverOrganizerEmails.includes(email.toLowerCase()); return <div key={email}><span><strong>{email}</strong><small>{protectedOrganizer ? "Server-approved email" : `Added by ${organizerGrants.find((grant) => grant.email === email)?.grantedByName || "Organizer"}`}</small></span>{protectedOrganizer ? <b>PROTECTED</b> : <button disabled={saving} onClick={() => void revokeOrganizer(email)}>Revoke</button>}</div>; })}</div>}</div>
+        <aside className="organizer-controls"><div><span className="eyebrow">ADD BY EMAIL</span><h4>Authorize an Organizer</h4><p>If the account already exists, access changes immediately. Otherwise the email is safely held until first sign-in.</p><label>ORGANIZER EMAIL<input type="email" placeholder="organizer@example.com" value={organizerEmail} onChange={(event) => setOrganizerEmail(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && organizerEmail.trim()) void grantOrganizer(); }} /></label><button className="primary" disabled={saving || !organizerEmail.trim()} onClick={() => void grantOrganizer()}>{saving ? "Saving…" : "Add Organizer"}</button></div><div className="promote-participant"><span className="eyebrow">REGISTERED USERS</span><h4>Promote a Participant</h4><input type="search" placeholder="Search name, email, or team…" value={organizerSearch} onChange={(event) => setOrganizerSearch(event.target.value)} />{organizerCandidates.length ? organizerCandidates.map((participant) => <button key={participant.id} disabled={saving} onClick={() => void updateRole(participant, "organizer")}><span><strong>{participant.displayName}</strong><small>{participant.email || participant.teamName || "Registered Participant"}</small></span><b>Make Organizer</b></button>) : <p className="notes-empty">No matching Participants.</p>}</div></aside></div>
+    </section>
     <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} authenticated event accounts · roles are enforced by the server</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{error && <p className="form-error directory-error">{error}</p>}<div className="participant-table user-management-table"><div className="participant-row heading"><span>USER</span><span>ROLE</span><span>TEAM</span><span>CONSENT</span><span>JOINED</span><span>LAST ACTIVE</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><span className="participant-identity"><strong>{participant.displayName}</strong><small>{participant.email || "Not collected"}</small></span><select aria-label={`Role for ${participant.displayName}`} value={participant.role} disabled={saving} onChange={(event) => void updateRole(participant, event.target.value as RegisteredParticipant["role"])}><option value="participant">Participant</option><option value="organizer">Organizer</option></select><span>{participant.teamName || "Unassigned"}</span><span><b className={`pill ${participant.consentStatus === "accepted" ? "on-track" : "needs-help"}`}>{participant.consentStatus}</b><small className="consent-version">{participant.consentVersion}</small></span><span>{new Date(participant.joinedAt).toLocaleString()}</span><span>{new Date(participant.lastActive).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
   </div>;
 }

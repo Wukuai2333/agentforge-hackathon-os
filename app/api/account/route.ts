@@ -32,9 +32,12 @@ async function bootstrap(request: Request, runtime: Runtime) {
     ORDER BY CASE WHEN identity_provider=? AND identity_subject=? THEN 0 ELSE 1 END LIMIT 1`)
     .bind(identity.provider, identity.subject, identity.email, identity.provider, identity.subject)
     .first<{ id: string; role: "participant" | "organizer" }>();
-  // The database is authoritative after first registration. The email allowlist
-  // only bootstraps the first Organizer account for a new installation.
-  const role = existing ? (existing.role === "organizer" ? "organizer" : "participant") : organizers(runtime).has(identity.email) ? "organizer" : "participant";
+  const organizerGrant = await runtime.DB.prepare("SELECT email FROM organizer_access_grants WHERE email=? AND status='active'")
+    .bind(identity.email).first<{ email: string }>();
+  // Server allowlists and active Organizer grants are authoritative. This lets
+  // an Organizer pre-authorize an email before that person signs up.
+  const authorizedOrganizer = organizers(runtime).has(identity.email) || Boolean(organizerGrant);
+  const role = authorizedOrganizer || existing?.role === "organizer" ? "organizer" : "participant";
   const userId = existing?.id || crypto.randomUUID();
   const registrationOpen = await runtime.DB.prepare("SELECT registration_open AS registrationOpen FROM event_configuration WHERE id='primary'").first<{ registrationOpen: number }>();
   const registration = existing ? await runtime.DB.prepare("SELECT id FROM event_participants WHERE event_id=? AND user_id=?").bind(eventId, userId).first<{ id: string }>() : null;
