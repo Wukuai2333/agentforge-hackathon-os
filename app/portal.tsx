@@ -52,8 +52,7 @@ const demoPrivacySections = [
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
 
-type AuthConfig = { enabled: boolean; url: string; publishableKey: string; googleEnabled: boolean; registrationOpen: boolean };
-type SupabaseAuthResult = { access_token?: string; refresh_token?: string; expires_in?: number; user?: { id?: string }; error?: string; error_description?: string; msg?: string };
+type AuthConfig = { enabled: boolean; mode: "agentforge"; googleEnabled: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
 
 async function endSession() {
   try { await fetch("/api/auth/session", { method: "DELETE" }); } finally {
@@ -61,6 +60,9 @@ async function endSession() {
   }
 }
 
+// Kept temporarily so existing Supabase sessions can be migrated without losing
+// account history. New event accounts use AgentForgeAuthPanel below.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AuthPanel({ eventName }: { eventName: string }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [mode, setMode] = useState<"signup" | "signin" | "forgot" | "reset">("signup");
@@ -72,22 +74,6 @@ function AuthPanel({ eventName }: { eventName: string }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  async function establishSession(result: SupabaseAuthResult, recovery = false) {
-    if (!result.access_token) throw new Error("The identity provider did not return a session.");
-    const response = await fetch("/api/auth/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: result.access_token, refreshToken: result.refresh_token, expiresIn: result.expires_in }) });
-    const saved = await response.json() as { error?: string };
-    if (!response.ok) throw new Error(saved.error || "The secure session could not be created.");
-    if (recovery) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      setMode("reset"); setMessage("Choose a new password for your account.");
-    } else {
-      const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
-      window.localStorage.removeItem("agentforge_auth_return_to");
-      window.history.replaceState(null, "", `${window.location.pathname}${returnTo}`);
-      window.location.reload();
-    }
-  }
-
   useEffect(() => {
     let cancelled = false;
     const prepare = async () => {
@@ -97,12 +83,6 @@ function AuthPanel({ eventName }: { eventName: string }) {
         if (cancelled) return;
         setConfig(next);
         if (!next.registrationOpen) setMode("signin");
-        const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-        const accessToken = params.get("access_token");
-        if (accessToken) {
-          setBusy(true);
-          await establishSession({ access_token: accessToken, refresh_token: params.get("refresh_token") || undefined, expires_in: Number(params.get("expires_in") || 3600) }, params.get("type") === "recovery");
-        } else if (params.get("error_description")) setError(params.get("error_description") || "Authentication failed.");
       } catch (problem) { if (!cancelled) setError(problem instanceof Error ? problem.message : "Authentication could not be prepared."); }
       finally { if (!cancelled) setBusy(false); }
     };
@@ -116,45 +96,98 @@ function AuthPanel({ eventName }: { eventName: string }) {
     setBusy(true); setError(""); setMessage("");
     try {
       if (!email.trim()) throw new Error("Enter your email address.");
-      if (kind !== "forgot" && password.length < 8) throw new Error("Use a password with at least 8 characters.");
+      if (password.length < 12) throw new Error("Use a password with at least 12 characters.");
       if (kind === "signup" && !config.registrationOpen) throw new Error("Registration is currently closed. Existing participants can still sign in.");
       if (kind === "signup" && password !== confirmPassword) throw new Error("The passwords do not match.");
       if (kind === "signup" && !name.trim()) throw new Error("Enter the name your teammates should see.");
-      const redirectTo = `${window.location.origin}/`;
-      const endpoint = kind === "signup" ? `${config.url}/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}` : kind === "signin" ? `${config.url}/auth/v1/token?grant_type=password` : `${config.url}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`;
-      const body = kind === "signup" ? { email: email.trim(), password, data: { display_name: name.trim(), full_name: name.trim() } } : kind === "signin" ? { email: email.trim(), password } : { email: email.trim() };
-      const response = await fetch(endpoint, { method: "POST", headers: { apikey: config.publishableKey, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const result = await response.json() as SupabaseAuthResult;
-      if (!response.ok) throw new Error(result.error_description || result.msg || result.error || "Authentication failed.");
-      if (kind === "forgot") { setMessage("Check your email for a password-reset link."); return; }
-      if (result.access_token) await establishSession(result);
-      else setMessage("Check your email to verify your account, then return here to sign in.");
+      const response = await fetch("/api/auth/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: kind, email: email.trim(), password, displayName: name.trim() }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Authentication failed.");
+      const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
+      window.localStorage.removeItem("agentforge_auth_return_to");
+      window.history.replaceState(null, "", `${window.location.pathname}${returnTo}`);
+      window.location.reload();
     } catch (problem) { setError(problem instanceof Error ? problem.message : "Authentication failed."); }
     finally { setBusy(false); }
   }
 
   async function resetPassword() {
-    setBusy(true); setError("");
-    try {
-      if (password.length < 8) throw new Error("Use a password with at least 8 characters.");
-      if (password !== confirmPassword) throw new Error("The passwords do not match.");
-      const response = await fetch("/api/auth/password", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Password could not be updated.");
-      setMessage("Password updated. Your event account is ready.");
-      window.setTimeout(() => window.location.reload(), 800);
-    } catch (problem) { setError(problem instanceof Error ? problem.message : "Password could not be updated."); }
-    finally { setBusy(false); }
+    setError("Password recovery has moved to the AgentForge identity flow.");
   }
 
   function googleSignIn() {
-    if (!config?.enabled || !config.googleEnabled) return;
-    window.localStorage.setItem("agentforge_auth_return_to", window.location.hash || "#/home");
-    const redirectTo = `${window.location.origin}/`;
-    window.location.href = `${config.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+    if (!config?.googleEnabled) return;
   }
 
   return <div className="entry-shell"><section className="entry-brand-panel"><span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span><h1>Build an agent that learns with you.</h1><p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p><div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div><small>Passwords are handled by Supabase Auth and never enter AgentForge, D1, Cognee, or Prompt Tracking.</small></section><section className="auth-card supabase-auth"><span className="eyebrow">SECURE EVENT ACCOUNT</span><h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Choose a new password"}</h2>{!config ? <p>Preparing secure sign-in…</p> : !config.enabled ? <div className="auth-config-pending"><strong>Authentication setup is ready for configuration.</strong><p>Add the Supabase Project URL and Publishable Key before opening registration.</p></div> : <>{!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}{mode !== "reset" && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}{mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}{mode !== "reset" && <label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>}{mode !== "forgot" && <label>{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" /></label>}{(mode === "signup" || mode === "reset") && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}{error && <p className="entry-error">{error}</p>}{message && <p className="auth-success">{message}</p>}{mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void authRequest("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}{mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}{mode === "forgot" && <><button className="primary auth-submit" disabled={busy} onClick={() => void authRequest("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}{mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void resetPassword()}>{busy ? "Updating…" : "Update password →"}</button>}{mode !== "forgot" && mode !== "reset" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled={!config.googleEnabled || busy} onClick={googleSignIn}><b>G</b>{config.googleEnabled ? "Continue with Google" : "Google login awaiting organizer setup"}</button></>}<p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p></>}</section></div>;
+}
+
+function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [mode, setMode] = useState<"signup" | "signin" | "forgot">("signup");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth/config").then(async (response) => {
+      const next = await response.json() as AuthConfig;
+      if (!cancelled) { setConfig(next); if (!next.registrationOpen) setMode("signin"); }
+    }).catch(() => { if (!cancelled) setError("Authentication could not be prepared."); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function submit(action: "signup" | "signin") {
+    setBusy(true); setError("");
+    try {
+      if (!email.trim()) throw new Error("Enter your email address.");
+      if (password.length < 12) throw new Error("Use a password with at least 12 characters.");
+      if (action === "signup" && !name.trim()) throw new Error("Enter the name your teammates should see.");
+      if (action === "signup" && password !== confirmPassword) throw new Error("The passwords do not match.");
+      const response = await fetch("/api/auth/password", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, email: email.trim(), password, displayName: name.trim() }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Authentication failed.");
+      const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
+      window.localStorage.removeItem("agentforge_auth_return_to");
+      window.history.replaceState(null, "", `${window.location.pathname}${returnTo}`);
+      window.location.reload();
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Authentication failed."); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="entry-shell">
+    <section className="entry-brand-panel">
+      <span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span>
+      <h1>Build an agent that learns with you.</h1>
+      <p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p>
+      <div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Consent</span><i>→</i><span><b>3</b>Team</span><i>→</i><span><b>4</b>Build</span></div>
+      <small>AgentForge stores a salted password hash, never the original password. Sessions use secure, HttpOnly cookies.</small>
+    </section>
+    <section className="auth-card supabase-auth">
+      <span className="eyebrow">SECURE EVENT ACCOUNT</span>
+      <h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : "Account recovery"}</h2>
+      {!config ? <p>Preparing secure sign-in…</p> : <>
+        {!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}
+        {mode !== "forgot" && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); }}>Sign in</button></div>}
+        {mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}
+        {mode !== "forgot" && <><label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label>PASSWORD<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 12 characters" /></label></>}
+        {mode === "signup" && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}
+        {error && <p className="entry-error">{error}</p>}
+        {mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void submit("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}
+        {mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void submit("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}
+        {mode === "forgot" && <><p>Automated email recovery is the next identity step. For this pilot, contact an Organizer to reset access.</p><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
+        {mode !== "forgot" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled><b>G</b>Google OAuth is the next phase</button></>}
+        <p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p>
+      </>}
+    </section>
+  </div>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -248,7 +281,7 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
     setSurveyStep((value) => value + 1);
   }
 
-  if (stage === "auth") return <AuthPanel eventName={eventName} />;
+  if (stage === "auth") return <AgentForgeAuthPanel eventName={eventName} />;
 
   if (stage === "consent" && current) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This policy demonstrates the consent flow and still requires organizer and legal review.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>The policy version, exact choices, participant registration, and timestamp are stored together.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !consentChecks.every(Boolean)} onClick={async () => { const next = await accountAction("accept_consent", { choices: consentChecks }); if (next) setStage("team"); }}>{saving ? "Saving consent…" : "Agree & choose a team →"}</button><button className="consent-signout" onClick={() => void endSession()}>I do not agree · sign out</button><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
 

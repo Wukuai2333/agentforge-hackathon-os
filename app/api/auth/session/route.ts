@@ -1,4 +1,6 @@
+import { env } from "cloudflare:workers";
 import { accessTokenFromRequest, authRuntime, identityFromRequest, identityFromSupabaseToken, refreshTokenFromRequest } from "../../../../lib/account";
+import { clearLocalSessionCookie, revokeLocalSession } from "../../../../lib/local-auth";
 
 type SessionInput = { accessToken?: string; refreshToken?: string; expiresIn?: number };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; error_description?: string; msg?: string };
@@ -14,6 +16,7 @@ function clearedHeaders() {
   const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
   headers.append("Set-Cookie", "agentforge_access_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0");
   headers.append("Set-Cookie", "agentforge_refresh_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0");
+  headers.append("Set-Cookie", clearLocalSessionCookie());
   return headers;
 }
 
@@ -43,6 +46,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const runtime = env as unknown as { DB: D1Database };
+  await revokeLocalSession(runtime.DB, request);
   const token = accessTokenFromRequest(request);
   const config = authRuntime();
   if (token && config.url && config.publishableKey) {

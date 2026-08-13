@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { localSessionIdentity } from "./local-auth";
 
 export type AuthIdentity = {
   subject: string;
   email: string;
   displayName: string;
-  provider: "chatgpt" | "supabase";
+  provider: "password" | "google" | "chatgpt" | "supabase";
 };
 
 type AuthRuntime = { SUPABASE_URL?: string; SUPABASE_PUBLISHABLE_KEY?: string };
@@ -79,6 +80,11 @@ function decodeName(headers: Headers, email: string) {
 }
 
 export async function identityFromRequest(request: Request): Promise<AuthIdentity | null> {
+  const runtime = env as unknown as { DB?: D1Database };
+  if (runtime.DB) {
+    const local = await localSessionIdentity(runtime.DB, request);
+    if (local) return local;
+  }
   const accessToken = accessTokenFromRequest(request);
   if (accessToken) return identityFromSupabaseToken(accessToken);
   const subject = request.headers.get("oai-authenticated-user-id")?.trim();
@@ -93,11 +99,13 @@ export async function currentAccount(db: D1Database, identity: AuthIdentity): Pr
       t.id AS teamId, t.name AS teamName, t.invite_code AS inviteCode
     FROM app_users u
     JOIN event_participants ep ON ep.user_id=u.id
+    LEFT JOIN user_identities ui ON ui.user_id=u.id
     LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
     LEFT JOIN teams t ON t.id=tm.team_id AND t.status='active'
-    WHERE u.identity_provider=? AND u.identity_subject=?
+    WHERE (ui.provider=? AND ui.provider_subject=?)
+       OR (u.identity_provider=? AND u.identity_subject=?)
     ORDER BY ep.joined_at DESC LIMIT 1`)
-    .bind(identity.provider, identity.subject).first<CurrentAccount>();
+    .bind(identity.provider, identity.subject, identity.provider, identity.subject).first<CurrentAccount>();
 }
 
 export async function requireCurrentAccount(request: Request, db: D1Database) {

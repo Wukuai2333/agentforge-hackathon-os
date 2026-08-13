@@ -51,6 +51,12 @@ async function bootstrap(request: Request, runtime: Runtime) {
     await runtime.DB.prepare(`INSERT INTO app_users (id,identity_provider,identity_subject,email,display_name,role,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?)`).bind(userId, identity.provider, identity.subject, identity.email, identity.displayName, role, now, now).run();
   }
+  await runtime.DB.prepare(`INSERT INTO user_identities
+      (id,user_id,provider,provider_subject,provider_email,linked_at,last_used_at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(provider,provider_subject) DO UPDATE SET
+        provider_email=excluded.provider_email,last_used_at=excluded.last_used_at`)
+    .bind(crypto.randomUUID(), userId, identity.provider, identity.subject, identity.email, now, now).run();
   if (!registration) {
     await runtime.DB.prepare(`INSERT INTO event_participants
       (id,event_id,user_id,identity_provider,identity_subject,email,display_name,role,status,consent_version,joined_at,updated_at)

@@ -27,6 +27,71 @@ export const appUsers = sqliteTable("app_users", {
   uniqueIndex("app_users_email_unique").on(table.email),
 ]);
 
+export const userIdentities = sqliteTable("user_identities", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  provider: text("provider", { enum: ["password", "google", "chatgpt", "supabase"] }).notNull(),
+  providerSubject: text("provider_subject").notNull(),
+  providerEmail: text("provider_email"),
+  linkedAt: integer("linked_at", { mode: "timestamp" }).notNull(),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+}, (table) => [
+  uniqueIndex("user_identities_provider_subject_unique").on(table.provider, table.providerSubject),
+  uniqueIndex("user_identities_user_provider_unique").on(table.userId, table.provider),
+  index("user_identities_user_idx").on(table.userId),
+]);
+
+export const userCredentials = sqliteTable("user_credentials", {
+  userId: text("user_id").primaryKey().references(() => appUsers.id),
+  passwordHash: text("password_hash").notNull(),
+  passwordSalt: text("password_salt").notNull(),
+  passwordAlgorithm: text("password_algorithm").notNull().default("pbkdf2-sha256"),
+  passwordIterations: integer("password_iterations").notNull(),
+  passwordUpdatedAt: integer("password_updated_at", { mode: "timestamp" }).notNull(),
+  failedAttemptCount: integer("failed_attempt_count").notNull().default(0),
+  lockedUntil: integer("locked_until", { mode: "timestamp" }),
+});
+
+export const authSessions = sqliteTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  revokeReason: text("revoke_reason"),
+  ipHash: text("ip_hash"),
+  userAgent: text("user_agent"),
+}, (table) => [
+  index("auth_sessions_user_active_idx").on(table.userId, table.revokedAt, table.expiresAt),
+  index("auth_sessions_expires_idx").on(table.expiresAt),
+]);
+
+export const authAuditLogs = sqliteTable("auth_audit_logs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => appUsers.id),
+  normalizedEmailHash: text("normalized_email_hash"),
+  eventType: text("event_type").notNull(),
+  result: text("result").notNull(),
+  ipHash: text("ip_hash"),
+  sessionId: text("session_id"),
+  metadataJson: text("metadata_json"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("auth_audit_logs_user_created_idx").on(table.userId, table.createdAt),
+  index("auth_audit_logs_type_created_idx").on(table.eventType, table.createdAt),
+]);
+
+export const assistantActiveLeases = sqliteTable("assistant_active_leases", {
+  participantId: text("participant_id").primaryKey(),
+  requestId: text("request_id").notNull().unique(),
+  acquiredAt: integer("acquired_at").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [
+  index("assistant_active_leases_expires_idx").on(table.expiresAt),
+]);
+
 export const eventParticipants = sqliteTable("event_participants", {
   id: text("id").primaryKey(),
   eventId: text("event_id").notNull().references(() => hackathonEvents.id),
@@ -248,6 +313,7 @@ export const organizerSettings = sqliteTable("organizer_settings", {
   id: text("id").primaryKey(),
   assistantEnabled: integer("assistant_enabled", { mode: "boolean" }).notNull().default(true),
   defaultTeamTokenQuota: integer("default_team_token_quota").notNull().default(100000),
+  maxOutputTokens: integer("max_output_tokens").notNull().default(1500),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
