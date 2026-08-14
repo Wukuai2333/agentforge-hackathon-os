@@ -129,6 +129,7 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -152,7 +153,12 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, email: email.trim(), password, displayName: name.trim() }),
       });
-      const result = await response.json() as { error?: string };
+      const raw = await response.text();
+      let result: { error?: string } = {};
+      if (raw) {
+        try { result = JSON.parse(raw) as { error?: string }; }
+        catch { throw new Error(response.ok ? "The server returned an unreadable response." : "The authentication service returned an error. Please try again."); }
+      }
       if (!response.ok) throw new Error(result.error || "Authentication failed.");
       const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
       window.localStorage.removeItem("agentforge_auth_return_to");
@@ -176,9 +182,9 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
       {!config ? <p>Preparing secure sign-in…</p> : <>
         {!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}
         {mode !== "forgot" && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); }}>Sign in</button></div>}
-        {mode === "signup" && <label>DISPLAY NAME<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}
-        {mode !== "forgot" && <><label>EMAIL<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label>PASSWORD<input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 12 characters" /></label></>}
-        {mode === "signup" && <label>CONFIRM PASSWORD<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label>}
+        {mode === "signup" && <label htmlFor="agentforge-display-name">DISPLAY NAME<input id="agentforge-display-name" name="name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}
+        {mode !== "forgot" && <><label htmlFor="agentforge-email">EMAIL<input id="agentforge-email" name="email" type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label htmlFor="agentforge-password">PASSWORD<span className="password-input-wrap"><input id="agentforge-password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? "Hide" : "Show"}</button></span></label></>}
+        {mode === "signup" && <label htmlFor="agentforge-confirm-password">CONFIRM PASSWORD<span className="password-input-wrap"><input id="agentforge-confirm-password" name="password-confirmation" type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /><button type="button" className="password-visibility" aria-label={showPassword ? "Hide passwords" : "Show passwords"} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? "Hide" : "Show"}</button></span></label>}
         {error && <p className="entry-error">{error}</p>}
         {mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void submit("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}
         {mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void submit("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}

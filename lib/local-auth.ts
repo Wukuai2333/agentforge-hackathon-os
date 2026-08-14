@@ -1,5 +1,7 @@
 const SESSION_COOKIE = "agentforge_session";
-const PASSWORD_ITERATIONS = 600_000;
+// Cloudflare Workers WebCrypto caps a single PBKDF2 operation at 100,000
+// iterations. The count is stored per credential so it remains upgradeable.
+const PASSWORD_ITERATIONS = 100_000;
 const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 function bytesToBase64(bytes: Uint8Array) {

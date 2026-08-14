@@ -127,7 +127,12 @@ export async function POST(request: Request) {
   let input: Input;
   try { input = await request.json() as Input; }
   catch { return Response.json({ error: "Invalid request body." }, { status: 400 }); }
-  if (input.action === "signup") return signup(request, runtime, input);
-  if (input.action === "signin") return signin(request, runtime, input);
-  return Response.json({ error: "Unknown authentication action." }, { status: 400 });
+  try {
+    if (input.action === "signup") return await signup(request, runtime, input);
+    if (input.action === "signin") return await signin(request, runtime, input);
+    return Response.json({ error: "Unknown authentication action." }, { status: 400 });
+  } catch (problem) {
+    console.error("Authentication request failed", problem);
+    return Response.json({ error: "The authentication service could not complete this request. Please try again." }, { status: 500 });
+  }
 }
