@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     env.DB.prepare(`SELECT e.event_participant_id AS participantId,ep.display_name AS displayName,e.milestone,e.status,e.source,e.occurred_at AS occurredAt
       FROM event_progress_events e JOIN event_participants ep ON ep.id=e.event_participant_id
       WHERE e.team_id=? ORDER BY e.occurred_at DESC LIMIT 200`).bind(account.teamId).all(),
-    env.DB.prepare(`SELECT m.id,m.entry_kind AS entryKind,m.category,m.statement,m.source_type AS sourceType,m.observed_at AS observedAt,ep.display_name AS participantName,c.status AS memoryStatus
+    env.DB.prepare(`SELECT m.id,m.anonymous_participant_id AS participantId,m.entry_kind AS entryKind,m.category,m.statement,m.source_type AS sourceType,m.observed_at AS observedAt,ep.display_name AS participantName,c.status AS memoryStatus
       FROM participant_model_entries m LEFT JOIN event_participants ep ON ep.id=m.anonymous_participant_id
       LEFT JOIN cognee_sync_outbox c ON c.source_type='participant_model' AND c.source_id=m.id
       WHERE m.anonymous_team_id=? ORDER BY m.observed_at DESC LIMIT 100`).bind(account.teamId).all(),
