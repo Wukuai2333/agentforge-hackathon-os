@@ -95,6 +95,11 @@ reconciliation rather than immediately retrying and risking duplicate cost.
 
 ## 4. ClawMax partner boundary
 
+The complete AgentForge implementation baseline is documented in
+[`AGENTFORGE_CLAWMAX_PARTNER_CONTRACT_V2.md`](./AGENTFORGE_CLAWMAX_PARTNER_CONTRACT_V2.md).
+It follows ClawMax's public Activity Export `2.0.0` platform contract while
+preserving the canonical `clawmax.activity-export/v1` wire schema.
+
 AgentForge is a direct, consented Activity Export destination.
 
 Target partner metadata:
