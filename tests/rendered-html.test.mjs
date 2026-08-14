@@ -112,24 +112,33 @@ test("uses Shared Space for team collaboration without renaming Cognee concepts"
   assert.match(portal, /COGNEE SEMANTIC MEMORY/);
 });
 
-test("uses Supabase for real participant authentication without storing passwords in AgentForge", async () => {
-  const [portal, account, identity, session, password, config] = await Promise.all([
-    source("app/portal.tsx"), source("app/api/account/route.ts"), source("lib/account.ts"),
-    source("app/api/auth/session/route.ts"), source("app/api/auth/password/route.ts"), source("app/api/auth/config/route.ts"),
+test("uses AgentForge password authentication with audited abuse controls", async () => {
+  const [portal, account, session, password, localAuth, schema] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/account/route.ts"), source("app/api/auth/session/route.ts"),
+    source("app/api/auth/password/route.ts"), source("lib/local-auth.ts"), source("db/schema.ts"),
   ]);
   assert.match(portal, /Create account/);
-  assert.match(portal, /Continue with Google/);
-  assert.match(portal, /Forgot password/);
-  assert.match(portal, /Passwords are handled by Supabase Auth/);
-  assert.match(identity, /jwtVerify/);
-  assert.match(identity, /identityFromSupabaseToken/);
   assert.match(session, /HttpOnly; Secure; SameSite=Lax/);
-  assert.match(session, /grant_type=refresh_token/);
-  assert.match(password, /method: "PUT"/);
-  assert.match(config, /SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(localAuth, /PBKDF2/);
+  assert.match(localAuth, /PASSWORD_ITERATIONS = 100_000/);
+  assert.match(schema, /passwordHash: text\("password_hash"\)/);
+  assert.match(password, /SIGNUPS_PER_IP_PER_HOUR = 100/);
+  assert.match(password, /LOGIN_FAILURE_LIMIT = 10/);
+  assert.match(password, /LOGIN_LOCK_MS = 5 \* 60 \* 1000/);
   assert.match(account, /ORGANIZER_EMAILS/);
   assert.match(account, /OR email=\?/);
-  assert.doesNotMatch(account + identity + session, /INSERT INTO .*password/i);
+  assert.doesNotMatch(localAuth + session, /console\.log\([^)]*password/i);
+});
+
+test("admits up to two concurrent Ask AI requests per participant", async () => {
+  const [assistant, schema, migration] = await Promise.all([
+    source("app/api/assistant/route.ts"), source("db/schema.ts"), source("drizzle/0019_assistant_concurrency_two.sql"),
+  ]);
+  assert.match(assistant, /MAX_CONCURRENT_REQUESTS_PER_PARTICIPANT = 2/);
+  assert.match(assistant, /SELECT COUNT\(\*\) FROM assistant_active_leases/);
+  assert.match(assistant, /You already have two AI requests running/);
+  assert.match(schema, /requestId: text\("request_id"\)\.primaryKey\(\)/);
+  assert.match(migration, /assistant_active_leases_participant_expires_idx/);
 });
 
 test("manages registered users with server roles and enforces registration state", async () => {

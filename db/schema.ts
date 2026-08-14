@@ -84,11 +84,12 @@ export const authAuditLogs = sqliteTable("auth_audit_logs", {
 ]);
 
 export const assistantActiveLeases = sqliteTable("assistant_active_leases", {
-  participantId: text("participant_id").primaryKey(),
-  requestId: text("request_id").notNull().unique(),
+  requestId: text("request_id").primaryKey(),
+  participantId: text("participant_id").notNull(),
   acquiredAt: integer("acquired_at").notNull(),
   expiresAt: integer("expires_at").notNull(),
 }, (table) => [
+  index("assistant_active_leases_participant_expires_idx").on(table.participantId, table.expiresAt),
   index("assistant_active_leases_expires_idx").on(table.expiresAt),
 ]);
 

@@ -22,6 +22,7 @@ type OpenAIResponse = {
 };
 
 const SYSTEM_PROMPT_VERSION = "agentforge-tutor-v1";
+const MAX_CONCURRENT_REQUESTS_PER_PARTICIPANT = 2;
 type AssistantRuntime = { DB: D1Database; OPENAI_API_KEY?: string; OPENAI_MODEL?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
 
 function sanitizeForMemory(value: string) {
@@ -95,12 +96,14 @@ export async function POST(request: Request) {
   if (Number(rateCounts?.minuteCount || 0) >= 10 || Number(rateCounts?.hourCount || 0) >= 100) {
     return Response.json({ error: "Ask AI limit reached: 10 requests per minute and 100 per hour." }, { status: 429, headers: { "Retry-After": "60" } });
   }
+  await runtime.DB.prepare("DELETE FROM assistant_active_leases WHERE participant_id=? AND expires_at<?")
+    .bind(participantId, now).run();
   const lease = await runtime.DB.prepare(`INSERT INTO assistant_active_leases (participant_id,request_id,acquired_at,expires_at)
-      VALUES (?,?,?,?) ON CONFLICT(participant_id) DO UPDATE SET request_id=excluded.request_id,
-      acquired_at=excluded.acquired_at,expires_at=excluded.expires_at
-      WHERE assistant_active_leases.expires_at<?`)
-    .bind(participantId, requestId, now, now + 2 * 60 * 1000, now).run();
-  if (!lease.meta.changes) return Response.json({ error: "Your previous AI request is still running. Please wait for it to finish." }, { status: 409 });
+      SELECT ?,?,?,? WHERE (
+        SELECT COUNT(*) FROM assistant_active_leases WHERE participant_id=? AND expires_at>=?
+      ) < ? ON CONFLICT(request_id) DO NOTHING`)
+    .bind(participantId, requestId, now, now + 2 * 60 * 1000, participantId, now, MAX_CONCURRENT_REQUESTS_PER_PARTICIPANT).run();
+  if (!lease.meta.changes) return Response.json({ error: "You already have two AI requests running. Please wait for one to finish." }, { status: 409 });
   const maxOutputTokens = Math.max(128, Math.min(4000, Number(assistantSetting?.maxOutputTokens || 1500)));
 
   let status: "success" | "error" = "error";

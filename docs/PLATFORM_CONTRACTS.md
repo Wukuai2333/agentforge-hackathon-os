@@ -27,6 +27,11 @@ Rules:
 - Passwords are stored only as salted hashes created by a vetted adaptive
   password-hashing implementation; plaintext passwords never enter D1 or logs.
 
+Confirmed authentication abuse controls:
+
+- Up to 100 successful account creations per source IP per hour.
+- Ten consecutive failed sign-in attempts lock the credential for 5 minutes.
+
 Still to configure before public registration:
 
 - Transactional email provider and sender domain.
@@ -49,7 +54,7 @@ Confirmed Ask AI defaults:
 
 - 10 requests per participant per minute.
 - 100 requests per participant per hour.
-- Initially one active generation per participant.
+- Up to two active generations per participant.
 - Every logical request has a unique idempotency key.
 - Event, team, member, and per-response output limits are organizer-controlled.
 

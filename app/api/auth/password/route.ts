@@ -14,6 +14,10 @@ type Credential = {
   lockedUntil: number | null;
 };
 
+const SIGNUPS_PER_IP_PER_HOUR = 100;
+const LOGIN_FAILURE_LIMIT = 10;
+const LOGIN_LOCK_MS = 5 * 60 * 1000;
+
 function organizerEmails(runtime: Runtime) {
   return new Set((runtime.ORGANIZER_EMAILS || "").split(",").map(normalizedEmail).filter(Boolean));
 }
@@ -46,10 +50,10 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
 
   const ipHash = await requestFingerprint(request);
   const recentSignups = await runtime.DB.prepare(`SELECT COUNT(*) AS count FROM auth_audit_logs
-    WHERE ip_hash=? AND event_type='signup' AND created_at>?`).bind(ipHash, Date.now() - 60 * 60 * 1000).first<{ count: number }>();
-  if (Number(recentSignups?.count || 0) >= 10) {
+    WHERE ip_hash=? AND event_type='signup' AND result='success' AND created_at>?`).bind(ipHash, Date.now() - 60 * 60 * 1000).first<{ count: number }>();
+  if (Number(recentSignups?.count || 0) >= SIGNUPS_PER_IP_PER_HOUR) {
     await authAudit(runtime.DB, request, "signup", "rate_limited", { email });
-    return Response.json({ error: "Too many signup attempts. Please try again later." }, { status: 429 });
+    return Response.json({ error: "This network has reached the hourly account creation limit. Please try again later." }, { status: 429 });
   }
 
   const existing = await runtime.DB.prepare("SELECT id FROM app_users WHERE email=? LIMIT 1").bind(email).first<{ id: string }>();
@@ -89,10 +93,10 @@ async function signin(request: Request, runtime: Runtime, input: Input) {
   const emailHash = await sha256(email);
   const recentFailures = await runtime.DB.prepare(`SELECT COUNT(*) AS count FROM auth_audit_logs
     WHERE normalized_email_hash=? AND event_type='signin' AND result='invalid_credentials' AND created_at>?`)
-    .bind(emailHash, now - 15 * 60 * 1000).first<{ count: number }>();
-  if (Number(recentFailures?.count || 0) >= 10) {
+    .bind(emailHash, now - LOGIN_LOCK_MS).first<{ count: number }>();
+  if (Number(recentFailures?.count || 0) >= LOGIN_FAILURE_LIMIT) {
     await authAudit(runtime.DB, request, "signin", "rate_limited", { email });
-    return Response.json({ error: "Too many failed attempts. Please wait 15 minutes and try again." }, { status: 429 });
+    return Response.json({ error: "Too many failed attempts. Please wait 5 minutes and try again." }, { status: 429 });
   }
 
   const credential = await runtime.DB.prepare(`SELECT u.id AS userId,u.email,u.display_name AS displayName,
@@ -107,7 +111,7 @@ async function signin(request: Request, runtime: Runtime, input: Input) {
     if (credential) {
       const failures = credential.failedAttemptCount + 1;
       await runtime.DB.prepare("UPDATE user_credentials SET failed_attempt_count=?,locked_until=? WHERE user_id=?")
-        .bind(failures, failures >= 10 ? now + 15 * 60 * 1000 : null, credential.userId).run();
+        .bind(failures, failures >= LOGIN_FAILURE_LIMIT ? now + LOGIN_LOCK_MS : null, credential.userId).run();
     }
     await authAudit(runtime.DB, request, "signin", "invalid_credentials", { email, userId: credential?.userId });
     return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
