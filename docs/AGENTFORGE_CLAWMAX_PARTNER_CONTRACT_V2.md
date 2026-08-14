@@ -1,9 +1,13 @@
 # AgentForge x ClawMax Activity Export Partner Contract
 
-**Contract version:** `2.0.0`  
-**Canonical activity schema:** `clawmax.activity-export/v1`  
-**Destination ID:** `agentforge`  
-**Status:** AgentForge implementation baseline  
+**Contract version:** `2.0.0`
+
+**Canonical activity schema:** `clawmax.activity-export/v1`
+
+**Destination ID:** `NYU_agentforge`
+
+**Status:** AgentForge implementation baseline
+
 **Date:** August 14, 2026
 
 This document defines the technical and operational contract for exporting explicitly consented participant activity from ClawMax to AgentForge. It is based on ClawMax's `PUBLIC_ACTIVITY_EXPORT_PARTNERS_2_0.md` platform contract and keeps ClawMax's canonical field names and wire format intact.
@@ -36,7 +40,7 @@ The integration must be simple for participants, must not slow ClawMax agent exe
 
 | Item | Decision |
 |---|---|
-| Partner destination | `agentforge` |
+| Partner destination | `NYU_agentforge` |
 | Display name | `AgentForge` |
 | Platform contract release | ClawMax `2.0.0` |
 | Event payload schema | `clawmax.activity-export/v1` |
@@ -91,7 +95,7 @@ AgentForge will provide the following values to the ClawMax integration owner. P
 
 | Field | AgentForge value |
 |---|---|
-| `destinationId` | `agentforge` |
+| `destinationId` | `NYU_agentforge` |
 | Display name | `AgentForge` |
 | Purpose | `Hackathon learning support, progress evidence, prompt coaching, and improvement of event tutorials.` |
 | Supported schema | `clawmax.activity-export/v1` |
@@ -159,7 +163,7 @@ Every event MUST reference a valid, unexpired AgentForge consent receipt. ClawMa
   "version": "activity-export-consent/v1",
   "userId": "opaque-clawmax-user-id",
   "workspaceId": "opaque-clawmax-workspace-id",
-  "destination": { "id": "agentforge", "displayName": "AgentForge" },
+  "destination": { "id": "NYU_agentforge", "displayName": "AgentForge" },
   "enrollment": {
     "eventId": "agentforge-event-2026-09",
     "scriptId": "personal-agent-hackathon",
@@ -201,7 +205,7 @@ Content-Type: application/json
 
 ```json
 {
-  "destinationId": "agentforge",
+  "destinationId": "NYU_agentforge",
   "connectionCode": "AF-7K3M-P9Q2",
   "workspaceId": "workspace_opaque",
   "instanceId": "instance_opaque"
@@ -210,7 +214,7 @@ Content-Type: application/json
 
 ```json
 {
-  "destinationId": "agentforge",
+  "destinationId": "NYU_agentforge",
   "eventId": "agentforge-event-2026-09",
   "scriptId": "personal-agent-hackathon",
   "participantId": "afp_opaque_partner_scoped_id",
@@ -239,7 +243,7 @@ ClawMax sends one visible turn or workflow lifecycle item per ordered event:
     "deploymentKind": "cloud"
   },
   "enrollment": {
-    "partner": "agentforge",
+    "partner": "NYU_agentforge",
     "eventId": "agentforge-event-2026-09",
     "scriptId": "personal-agent-hackathon",
     "participantId": "afp_opaque_partner_scoped_id"
@@ -293,7 +297,7 @@ X-ClawMax-Schema-Version: clawmax.activity-export/v1
 ```json
 {
   "batchId": "batch_01J...",
-  "destinationId": "agentforge",
+  "destinationId": "NYU_agentforge",
   "sentAt": "2026-09-26T14:03:20.000Z",
   "events": []
 }
@@ -302,7 +306,7 @@ X-ClawMax-Schema-Version: clawmax.activity-export/v1
 Request rules:
 
 - `Idempotency-Key` MUST equal `batchId`.
-- `destinationId` MUST equal `agentforge`.
+- `destinationId` MUST equal `NYU_agentforge`.
 - A batch contains only AgentForge events using the named schema.
 - Batches preserve sequence within each conversation.
 - Initial maximum: 50 events or 256 KiB serialized JSON, whichever comes first.
@@ -376,7 +380,7 @@ Idempotency-Key: purge_01J...
 ```json
 {
   "purgeId": "purge_01J...",
-  "destinationId": "agentforge",
+  "destinationId": "NYU_agentforge",
   "workspaceId": "workspace_opaque",
   "receiptId": "consent_01J...",
   "requestedAt": "2026-09-26T18:03:20.000Z"
@@ -508,7 +512,7 @@ Authorization: Bearer <server-managed-ingestion-token>
 
 ```json
 {
-  "destinationId": "agentforge",
+  "destinationId": "NYU_agentforge",
   "status": "ready",
   "contractVersion": "2.0.0",
   "schemaVersions": ["clawmax.activity-export/v1"],

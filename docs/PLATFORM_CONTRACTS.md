@@ -104,7 +104,7 @@ AgentForge is a direct, consented Activity Export destination.
 
 Target partner metadata:
 
-- `destinationId`: `agentforge`
+- `destinationId`: `NYU_agentforge`
 - Schema target: `clawmax.activity-export/v1`
 - Delivery: authenticated HTTPS batch ingestion
 - Authentication: deployment-managed Bearer token
