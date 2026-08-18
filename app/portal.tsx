@@ -33,8 +33,8 @@ const milestones = [
 const lessons = [
   { n: "01", title: "Shape a useful agent", meta: "12 min · Agent design", status: "Done", color: "lime" },
   { n: "02", title: "Build your first ClawMax agent", meta: "20 min · ClawMax", status: "In progress", color: "violet" },
-  { n: "03", title: "Give your agent memory", meta: "18 min · Cognee", status: "Start", color: "blue" },
-  { n: "04", title: "Recall the right context", meta: "15 min · Cognee", status: "Locked", color: "orange" },
+  { n: "03", title: "Remember your first source", meta: "15 min · Cognee v1.0", status: "Start", color: "blue" },
+  { n: "04", title: "Recall and verify context", meta: "15 min · Cognee v1.0", status: "Locked", color: "orange" },
   { n: "05", title: "Evaluate and improve", meta: "16 min · Evaluation", status: "Locked", color: "pink" },
 ];
 
@@ -607,7 +607,7 @@ function Overview({ progress, setView }: { progress: number; setView: (view: Vie
     </div>
     <div className="section-title"><div><span>YOUR NEXT MOVES</span><h3>Keep the momentum</h3></div><small>Recommended for your team</small></div>
     <div className="move-grid">
-      <button className="move-card accent-violet" onClick={() => setView("learn")}><span className="move-icon">⌁</span><small>LEARN · 18 MIN</small><h4>Give your agent<br />long-term memory</h4><p>Add → Cognify → Search</p><b>Start tutorial →</b></button>
+      <button className="move-card accent-violet" onClick={() => setView("learn")}><span className="move-icon">⌁</span><small>LEARN · 30 MIN</small><h4>Give your agent<br />verifiable memory</h4><p>Remember → Recall → Verify</p><b>Start onboarding →</b></button>
       <button className="move-card accent-lime" onClick={() => setView("progress")}><span className="move-icon">✓</span><small>BUILD · MILESTONE 04</small><h4>Store your first<br />useful memory</h4><p>Prove recall with one test.</p><b>Open milestone →</b></button>
       <button className="move-card accent-orange" onClick={() => setView("demo")}><span className="move-icon">◇</span><small>PREP · MIDPOINT</small><h4>Define how you’ll<br />measure success</h4><p>Make improvement visible.</p><b>Create evaluation →</b></button>
     </div>
@@ -667,10 +667,10 @@ function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) 
         <b>Open placeholder →</b>
       </button>
       <button className="tutorial-library-card cognee" onClick={() => setView("cogneeTutorial")}>
-        <span className="library-mark">◎</span><span className="library-status available">DEMO AVAILABLE</span>
-        <small>COGNEE · FIVE-STEP MEMORY LOOP</small><h3>Give your agent long-term memory</h3>
-        <p>Practice Add, Cognify, Search, Feedback, and Improve in one guided walkthrough with expected evidence.</p>
-        <b>Start demo tutorial →</b>
+        <span className="library-mark">◎</span><span className="library-status available">ONBOARDING DEMO</span>
+        <small>COGNEE · OFFICIAL DOCS GUIDED PATH</small><h3>Build memory you can actually verify</h3>
+        <p>Learn the current Remember and Recall workflow, then understand where Add, Cognify, Search, sessions, REST, and MCP fit.</p>
+        <b>Start Cognee onboarding →</b>
       </button>
     </section>
     <section className="tutor-team-note">
@@ -689,6 +689,84 @@ function ClawMaxTutorial() {
 }
 
 function CogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
+  const [step, setStep] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const steps = [
+    {
+      n: "01", action: "MENTAL MODEL", title: "Decide what this memory is for",
+      detail: "Start with one source, one dataset boundary, and one question that should be answered from memory. This keeps the first test understandable and makes access scope explicit.",
+      code: `DATASET = "team_synapse"\nSOURCE = "Team preference: plans should be concise and avoid meeting conflicts."\nTEST_QUESTION = "How does our team prefer plans?"`,
+      result: "You can name the owner, dataset, source, and one answerable test question before uploading anything.",
+      advanced: "A dataset is a useful retrieval and ownership boundary. Private participant memory and team-shared memory should not silently use the same scope.",
+      docs: "https://docs.cognee.ai/getting-started/quickstart",
+    },
+    {
+      n: "02", action: "CONNECT", title: "Create a Cloud key without exposing it",
+      detail: "Create a Cognee Cloud account, generate an API key, and store it as a server-side environment variable. The key is shown once and should never be committed or placed in participant browser code.",
+      code: `# Server-side environment only\nCOGNEE_API_KEY="your-key-from-cognee-cloud"\n\n# Never paste this key into prompts, Shared Space, or client JavaScript.`,
+      result: "The backend can authenticate to Cognee while the browser and repository never receive the secret.",
+      advanced: "For a shared event, AgentForge owns the integration credential. Participants should not need to distribute personal provider keys.",
+      docs: "https://docs.cognee.ai/cognee-cloud/sign-up",
+    },
+    {
+      n: "03", action: "REMEMBER", title: "Turn trusted content into permanent memory",
+      detail: "In Cognee v1.0, remember() is the recommended high-level operation. Permanent mode stores the source and builds retrieval-ready graph memory in one operation.",
+      code: `import cognee\n\nawait cognee.remember(\n    SOURCE,\n    dataset_name=DATASET,\n)`,
+      result: "The content is normalized, chunked, connected in graph memory, embedded, and prepared for retrieval.",
+      advanced: "The older explicit path is add() followed by cognify(). It is still useful when you need pipeline-level control, but add() alone only ingests data and does not build searchable graph memory.",
+      docs: "https://docs.cognee.ai/core-concepts/main-operations/remember",
+    },
+    {
+      n: "04", action: "RECALL", title: "Retrieve memory and inspect the evidence",
+      detail: "recall() is the recommended v1.0 retrieval operation. Ask a question whose expected answer you already know, then inspect whether the returned context came from the intended dataset.",
+      code: `result = await cognee.recall(\n    query_text=TEST_QUESTION,\n    datasets=[DATASET],\n)\n\nprint(result)`,
+      result: "The answer should mention concise plans and avoiding conflicts, grounded in the remembered source rather than a plausible guess.",
+      advanced: "Legacy search() remains useful for choosing explicit retrieval modes. Retrieval-only modes can return context without paying for a separate generated answer.",
+      docs: "https://docs.cognee.ai/getting-started/quickstart",
+    },
+    {
+      n: "05", action: "SCOPE", title: "Choose permanent or session memory",
+      detail: "Permanent memory is appropriate for durable participant, team, or project knowledge. A session_id creates temporary conversational memory for a bounded interaction instead of silently adding everything to the permanent graph.",
+      code: `# Temporary conversational context\nawait cognee.remember(\n    "The participant wants shorter explanations today.",\n    session_id="demo-session-42",\n)\n\n# Durable project knowledge uses a dataset instead.`,
+      result: "Temporary context follows its session policy; durable knowledge remains in the intended dataset and can be recalled later.",
+      advanced: "This separation matters for privacy and model quality: not every chat message deserves to become a long-term fact.",
+      docs: "https://docs.cognee.ai/core-concepts/main-operations/remember",
+    },
+    {
+      n: "06", action: "OPERATE", title: "Verify status before blaming retrieval",
+      detail: "Production onboarding needs visible processing state. If recall fails, first check that memory processing completed, then verify dataset scope, source sufficiency, and the test query.",
+      code: `# Documented REST status checks\nGET /api/v1/datasets/status?dataset=<dataset-uuid>\nGET /api/v1/activity/pipeline-runs?dataset_id=<dataset-uuid>\n\n# REST reference is available at /docs on your deployment.`,
+      result: "The UI distinguishes queued, processing, ready, and failed states, and a failed job can be retried without losing the raw source.",
+      advanced: "Agents can connect through the Python client, REST API, or Cognee MCP tools (remember, recall, forget). Pipelines are the lower-level orchestration layer when custom processing is needed.",
+      docs: "https://docs.cognee.ai/guides/deploy-rest-api-server",
+    },
+  ];
+  const current = steps[step];
+  async function copyCode() {
+    await navigator.clipboard.writeText(current.code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+  return <>
+    <div className="demo-notice cognee-onboarding-notice"><span>TEMPORARY ONBOARDING DEMO</span><div><strong>This is a guided layer over Cognee&apos;s official documentation.</strong><p>The source links remain authoritative. This page reorganizes the current docs into a short, task-oriented path for a live onboarding demonstration.</p></div></div>
+    <div className="cognee-head"><div><span className="eyebrow">COGNEE ONBOARDING · 30–40 MIN</span><h2>Remember something. Recall it. Prove it came from memory.</h2><p>The recommended v1.0 path is Remember → Recall. Advanced users can open the explicit Add → Cognify → Search pipeline when they need more control.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this tutorial</button></div>
+    <section className="cognee-path-switch" aria-label="Cognee operation paths">
+      <article className="recommended"><small>RECOMMENDED · COGNEE V1.0</small><strong>remember()</strong><i>→</i><strong>recall()</strong><p>Fastest path from trusted source to retrieval-ready memory.</p></article>
+      <article><small>LEGACY / ADVANCED CONTROL</small><strong>add()</strong><i>→</i><strong>cognify()</strong><i>→</i><strong>search()</strong><p>Useful for explicit ingestion, processing, and retrieval choices.</p></article>
+    </section>
+    <div className="tutorial-outcome-strip"><span>A SUCCESSFUL ONBOARDING DEMO SHOWS</span><div>{["A secret stays server-side", "One source enters the right scope", "Recall returns grounded context", "Processing state is visible"].map((item) => <p key={item}>✓ {item}</p>)}</div></div>
+    <div className="cognee-tutorial-layout cognee-onboarding-layout">
+      <nav className="tutorial-step-nav" aria-label="Cognee onboarding modules">{steps.map((item, index) => <button key={item.n} className={step === index ? "active" : ""} onClick={() => { setCopied(false); setStep(index); }}><b>{item.n}</b><span><small>{item.action}</small>{item.title}</span>{index < step && <i>✓</i>}</button>)}</nav>
+      <section className="tutorial-workspace"><div className="workspace-meta"><span>MODULE {current.n} OF 06</span><b>OFFICIAL DOCS GUIDED</b></div><span className="action-chip">{current.action}</span><h2>{current.title}</h2><p>{current.detail}</p><div className="code-demo"><header><span>PYTHON / CONFIG · DEMO EXAMPLE</span><button onClick={() => void copyCode()}>{copied ? "Copied ✓" : "Copy"}</button></header><pre>{current.code}</pre></div><div className="demo-result"><span>CHECKPOINT</span><p>{current.result}</p></div><div className="real-step-note advanced-note"><span>ADVANCED UNDERSTANDING</span><p>{current.advanced}</p></div><footer><button className="outline-button" disabled={step === 0} onClick={() => { setCopied(false); setStep((value) => Math.max(0, value - 1)); }}>← Previous</button><a className="official-doc-button" href={current.docs} target="_blank" rel="noreferrer">Open source docs ↗</a><button className="primary" disabled={step === steps.length - 1} onClick={() => { setCopied(false); setStep((value) => Math.min(steps.length - 1, value + 1)); }}>Next module →</button></footer></section>
+      <aside className="tutorial-reality cognee-reference"><span>KEEP THIS MENTAL MODEL</span><h3>Operational facts and semantic memory have different jobs.</h3><div><b>1</b><p><strong>Your app records the event.</strong><br />Identity, consent, progress, raw prompts, and audit history stay in the operational database.</p></div><div><b>2</b><p><strong>Cognee builds semantic memory.</strong><br />Consented sources become connected, retrievable context with explicit dataset or session scope.</p></div><div><b>3</b><p><strong>Your agent uses recalled context.</strong><br />The answer model receives relevant evidence; the UI should show whether memory was used.</p></div><div><b>4</b><p><strong>Humans verify the result.</strong><br />A fluent answer is not proof. Test against a known source and preserve provenance.</p></div><div className="tutorial-source-links"><a href="https://docs.cognee.ai/cognee-cloud/quickstart" target="_blank" rel="noreferrer">Cloud quickstart ↗</a><a href="https://docs.cognee.ai/core-concepts/main-operations/legacy-operations/add" target="_blank" rel="noreferrer">Add explained ↗</a><a href="https://docs.cognee.ai/core-concepts/main-operations/legacy-operations/search" target="_blank" rel="noreferrer">Search modes ↗</a><a href="https://docs.cognee.ai/cognee-mcp/mcp-tools" target="_blank" rel="noreferrer">MCP tools ↗</a><a href="https://docs.cognee.ai/core-concepts/building-blocks/pipelines" target="_blank" rel="noreferrer">Pipelines ↗</a><a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">All documentation ↗</a></div><small className="tutorial-version-note">Official sources checked August 2026. Example outputs vary by source, model, and configuration.</small></aside>
+    </div>
+  </>;
+}
+
+// Retained on this temporary branch so the original Hackathon tutorial can be
+// restored without reconstructing it after the Cognee onboarding demo.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyCogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
   const [step, setStep] = useState(0);
   const [copied, setCopied] = useState(false);
   const steps = [
