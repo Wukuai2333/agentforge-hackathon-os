@@ -1,18 +1,36 @@
 # AgentForge x ClawMax Activity Export Partner Contract
 
-**Contract version:** `2.0.0`
+**AgentForge profile revision:** `2.0.1-draft`
+
+**ClawMax platform contract:** `2.0.0`
 
 **Canonical activity schema:** `clawmax.activity-export/v1`
 
-**Destination ID:** `NYU_agentforge`
+**Proposed destination ID:** `NYU_agentforge` — final syntax open with ClawMax
 
-**Status:** AgentForge implementation baseline
+**Status:** AgentForge proposed implementation profile for ClawMax review; not yet mutually accepted
 
-**Date:** August 14, 2026
+**Last reviewed:** August 20, 2026
 
 This document defines the technical and operational contract for exporting explicitly consented participant activity from ClawMax to AgentForge. It is based on ClawMax's `PUBLIC_ACTIVITY_EXPORT_PARTNERS_2_0.md` platform contract and keeps ClawMax's canonical field names and wire format intact.
 
 This is an interoperability contract, not a substitute for a privacy policy, data processing agreement, institutional review, or research consent. Those documents must be approved before production use.
+
+### Review status
+
+The requirements in this document are AgentForge's proposed launch baseline. They become a shared contract only after ClawMax and AgentForge confirm the items marked **OPEN WITH CLAWMAX** below. Until then, no production endpoint, credential, consent receipt, or activity export is enabled.
+
+The shared review boundary is limited to destination identity, enrollment, consent receipt synchronization, canonical events, acknowledgement and retry behavior, group-conversation handling, and purge behavior. AgentForge's D1 tables, Cognee outbox, dashboards, and analysis implementation are internal details unless they change externally observable behavior.
+
+Open decisions for the ClawMax review:
+
+1. accepted `destinationId` syntax and final value;
+2. catalog/adapter manifest and supported enrollment mechanism;
+3. consent receipt registration, scope update, expiry, and revocation transport;
+4. partial-batch retry behavior;
+5. launch behavior for group conversations;
+6. purge status and completion contract, including Cognee propagation; and
+7. sandbox host, credential exchange, fixtures, and technical contacts.
 
 ## 1. Contract goals
 
@@ -40,7 +58,7 @@ The integration must be simple for participants, must not slow ClawMax agent exe
 
 | Item | Decision |
 |---|---|
-| Partner destination | `NYU_agentforge` |
+| Partner destination | Proposed `NYU_agentforge`; final syntax **OPEN WITH CLAWMAX** (prefer `nyu-agentforge` if lowercase kebab-case is required) |
 | Display name | `AgentForge` |
 | Platform contract release | ClawMax `2.0.0` |
 | Event payload schema | `clawmax.activity-export/v1` |
@@ -107,9 +125,9 @@ AgentForge will provide the following values to the ClawMax integration owner. P
 | Privacy URL | `https://<agentforge-production-host>/privacy` |
 | Supported initial scopes | See Section 7 |
 | Default identity | Partner-scoped pseudonymous participant ID |
-| Reviewer access | Authenticated AgentForge users with `organizer` role for the linked event |
+| Reviewer access | Event-scoped AgentForge users explicitly granted raw-data review permission; organizer role alone is insufficient |
 | Credential owner | AgentForge event platform operator |
-| Retention | Event-specific disclosure; launch default in Section 18 |
+| Retention | Event-specific disclosure; proposed launch default in Section 17 |
 
 The current `chatgpt.site` URL is a prototype host and MUST NOT be treated as the final production ingestion origin. A stable production hostname will replace the placeholder without changing the path or payload contract.
 
@@ -137,7 +155,7 @@ AgentForge supports the canonical ClawMax scopes below. Each must remain indepen
 | Scope | AgentForge use | Launch default |
 |---|---|---|
 | `conversation.direct` | Participant prompts and visible agent replies used for support and prompt coaching | Offered |
-| `conversation.group` | Participant turns and visible replies used for team-level learning signals | Off unless the event needs group chat |
+| `conversation.group` | Participant turns and directly paired visible replies used for team-level learning signals | Off for initial launch; **OPEN WITH CLAWMAX** |
 | `workflow.instructions` | Participant run instructions used as task and progress evidence | Offered |
 | `workflow.outputs` | Visible workflow outcomes and status used for progress and outcome evaluation | Offered |
 | `builder.conversation` | Builder questions and visible replies used to understand agent-design friction | Separate opt-in |
@@ -152,6 +170,8 @@ The following are outside this contract and MUST NOT be exported:
 - browser history, keystrokes, unrelated navigation, or device monitoring;
 - another user's private activity; and
 - activity created before the applicable consent receipt.
+
+For the initial launch, `conversation.group` remains disabled. If enabled later, ClawMax MUST export only the consenting participant's own turn and a directly paired visible assistant reply that contains no quoted or embedded content from a non-consenting user. Another participant's receipt cannot authorize export of the first participant's content. The parties MUST approve conformance fixtures for mixed-consent conversations before this scope is enabled.
 
 ## 8. Consent receipt
 
@@ -178,6 +198,32 @@ Every event MUST reference a valid, unexpired AgentForge consent receipt. ClawMa
 ```
 
 Before consent, the participant MUST be told the receiver, event, purpose, content categories, identity mode, capture window, retention, deletion behavior, and how to stop sharing.
+
+### 8.1 Consent receipt synchronization
+
+An event cannot be validated from `receiptId` and `version` alone. Before ClawMax delivers the first event authorized by a receipt, it MUST register the minimized receipt with AgentForge. This endpoint is an AgentForge proposal and is **OPEN WITH CLAWMAX** pending confirmation that it fits the ClawMax v2.0 adapter lifecycle.
+
+```http
+PUT /v1/clawmax/consent-receipts/consent_01J...
+Authorization: Bearer <server-managed-ingestion-token>
+Content-Type: application/json
+Idempotency-Key: consent_01J...:1
+```
+
+The body contains the receipt fields shown above, excluding direct identifiers not separately disclosed. AgentForge validates that the destination, enrollment, participant, event, scopes, and time window match the authenticated credential and enrollment. It stores only the minimized state required for authorization, audit, and purge.
+
+Scope expansion, scope reduction, renewal, or expiry-window changes MUST create a new receipt version or new receipt ID; an existing authorization MUST NOT be silently broadened. ClawMax MUST stop capture immediately when a receipt expires or is revoked. Scope reduction MUST also remove unsent events for the removed scopes.
+
+Revocation is synchronized before or together with the purge request:
+
+```http
+POST /v1/clawmax/consent-receipts/consent_01J...:revoke
+Authorization: Bearer <server-managed-ingestion-token>
+Content-Type: application/json
+Idempotency-Key: consent_01J...:revoke:1
+```
+
+AgentForge immediately blocks new ingestion and user-facing access for the revoked receipt, records a content-free audit event, and begins the purge state machine in Section 14. Already-delivered data from a removed scope is treated as revoked and included in purge unless the participant disclosure and jointly approved policy explicitly state otherwise.
 
 ## 9. Participant and event mapping
 
@@ -282,7 +328,11 @@ ClawMax sends one visible turn or workflow lifecycle item per ordered event:
 
 Required source values are `agent-chat`, `group-chat`, `community-chat`, `workflow`, and `builder`. Supported event types are `conversation.turn`, `workflow.started`, `workflow.completed`, and `workflow.failed`.
 
-Every identifier is opaque. Nullable execution metadata remains `null`; ClawMax MUST NOT invent model, token, duration, or status values. AgentForge preserves unknown additive fields in raw storage but rejects unsupported source or event-type values per event.
+Every identifier is opaque. Nullable execution metadata remains `null`; ClawMax MUST NOT invent model, token, duration, or status values. The production contract MUST include a versioned JSON Schema defining required and nullable fields, enumerations, maximum lengths, timestamp formats, size limits, and `additionalProperties` behavior. Examples in this document are explanatory and are not a substitute for that schema.
+
+AgentForge accepts only allowlisted envelope and content fields into normalization or Cognee. Unknown additive fields are never displayed, normalized, or sent to Cognee until reviewed under a compatible schema update. Unknown required or security-sensitive fields cause a sanitized per-event rejection.
+
+All timestamps use UTC RFC 3339. The conformance suite will freeze the allowed clock-skew tolerance. `content.sha256` is SHA-256 over the UTF-8 bytes of the final ClawMax-redacted `content.text`; the shared fixtures MUST define the exact normalization behavior rather than allowing either side to recalculate from a different representation.
 
 ## 11. Batch ingestion endpoint
 
@@ -312,8 +362,9 @@ Request rules:
 - Initial maximum: 50 events or 256 KiB serialized JSON, whichever comes first.
 - Initial maximum event body: 64 KiB serialized JSON.
 - A retry reuses the same `batchId`, `eventId`, and content.
+- Delivery may arrive out of order across batches. AgentForge records `sequence` for reconstruction and gap detection but MUST NOT block ingestion while waiting for a missing earlier event.
 
-AgentForge returns `202 Accepted` only after authentication, validation, deduplication, and durable raw storage. It does not wait for normalization, Cognee, or AI analysis.
+AgentForge returns `202 Accepted` only after authentication, validation, deduplication, receiver-side secret/policy scanning, and durable sanitized evidence storage. It does not wait for normalization, Cognee, or AI analysis.
 
 ```json
 {
@@ -332,9 +383,11 @@ AgentForge returns `202 Accepted` only after authentication, validation, dedupli
 
 Duplicates are successful acknowledgements and MUST NOT create another raw or normalized record. Valid events may be accepted while invalid events in the same batch are permanently rejected with a stable code and sanitized message.
 
+For transient per-event rejections in a `202` response, the proposed launch behavior is to resend the identical batch with the same `batchId` and request body. AgentForge acknowledges previously accepted events as duplicates and retries only the transient processing path. This rule is **OPEN WITH CLAWMAX**; if ClawMax instead creates a child batch containing only rejected events, the child-batch ID and lineage rule must be added before implementation.
+
 ## 12. Authentication and credential handling
 
-AgentForge issues ClawMax a dedicated high-entropy ingestion token. It is not an OpenAI key, Cognee key, organizer code, user session, or participant API key.
+AgentForge issues ClawMax a dedicated high-entropy ingestion token. It is not an OpenAI key, Cognee key, organizer code, user session, or participant API key. A token is bound to one environment, destination, and allowed ClawMax deployment/instance; production MUST NOT use one global credential shared across unrelated deployments or environments. Event restrictions may be added where operationally practical.
 
 It MUST be server-managed, stored only as a secret or one-way verifier, scoped to one environment and allowed enrollment, never sent to browsers or agents, never logged, separately issued for sandbox and production, immediately revocable, and transmitted only over HTTPS.
 
@@ -351,21 +404,28 @@ Missing or invalid credentials return `401`. Valid credentials without the requi
 
 ## 13. Idempotency, response behavior, and retry
 
-Delivery is at least once. AgentForge provides effectively-once ingestion by enforcing uniqueness on `(destination_id, batch_id)` and `(destination_id, event_id)`.
+Delivery is at least once. AgentForge provides effectively-once ingestion by enforcing uniqueness on `(destination_id, batch_id)` and `(destination_id, event_id)`. It also stores a canonical request hash for each batch and a content hash for each event.
+
+- same `batchId` plus the same canonical request hash is a successful duplicate;
+- same `batchId` plus a different canonical request hash is `409 idempotency_mismatch`, a permanent error that MUST NOT be treated as accepted;
+- same `eventId` plus the same event content hash is a successful duplicate; and
+- same `eventId` plus a different event content hash is `409 event_id_mismatch`, a permanent integrity error.
+
+Different event IDs may legitimately contain identical text and therefore have the same content hash. A hash alone is never the event identity.
 
 | HTTP status | ClawMax action |
 |---|---|
 | `200` / `202` | Acknowledge accepted and duplicate IDs; retry only transient rejections |
 | `400` | Do not retry an unchanged malformed request |
 | `401` / `403` | Pause destination and show `needs attention` |
-| `409` | Treat a recognized idempotency conflict as accepted |
+| `409` | Do not retry unchanged; pause and alert on `idempotency_mismatch` or `event_id_mismatch` |
 | `413` | Split the batch and retry within limits |
 | `429` | Honor `Retry-After` |
 | `5xx` / timeout | Exponential backoff with jitter |
 
-Suggested transient schedule is 5 seconds, 15 seconds, 45 seconds, 2 minutes, 5 minutes, then bounded exponential backoff with jitter. ClawMax's undelivered queue initially MUST NOT retain content longer than 24 hours.
+Suggested transient schedule is 5 seconds, 15 seconds, 45 seconds, 2 minutes, 5 minutes, then bounded exponential backoff with jitter. ClawMax's undelivered queue initially MUST NOT retain content beyond the earliest of 24 hours, receipt expiry, event end, or revocation.
 
-Stable rejection codes include `invalid_batch`, `invalid_event`, `unsupported_schema`, `invalid_destination`, `unsupported_source`, `unsupported_event_type`, `unsupported_scope`, `unknown_enrollment`, `expired_consent`, `revoked_consent`, `content_too_large`, `rate_limited`, and `temporarily_unavailable`. Error messages MUST NOT echo raw content or credentials.
+Stable rejection codes include `invalid_batch`, `invalid_event`, `unsupported_schema`, `invalid_destination`, `unsupported_source`, `unsupported_event_type`, `unsupported_scope`, `unknown_enrollment`, `unknown_consent`, `expired_consent`, `revoked_consent`, `content_too_large`, `idempotency_mismatch`, `event_id_mismatch`, `rate_limited`, and `temporarily_unavailable`. Error messages MUST NOT echo raw content or credentials.
 
 ## 14. Purge endpoint
 
@@ -407,11 +467,13 @@ Authorization: Bearer <server-managed-ingestion-token>
 
 A completed purge removes or irreversibly anonymizes ClawMax raw content, normalized prompts/responses/progress/feedback, pending Cognee outbox records, Cognee memory and derived inferences linked only to the receipt, and user-facing copies derived only from that content. AgentForge may retain a content-free audit tombstone with the purge ID, timestamps, basis, counts, and status.
 
+Every derived record MUST retain source-event and receipt lineage. If a derived signal has several independent source receipts, purge removes the revoked receipt's evidence edge and then recomputes, anonymizes, or withdraws the derived record. It MUST NOT delete evidence belonging to another still-authorized participant, and it MUST NOT retain an inference that is no longer supported after the removed evidence is excluded. User-facing access is blocked immediately; physical D1 deletion and semantic Cognee deletion may complete asynchronously within the disclosed deadline. Failed deletion steps remain visible to authorized reviewers and retry until completed or manually resolved.
+
 **Implementation gate:** purge propagation is required for production but is not implemented in the current AgentForge prototype. ClawMax export MUST remain disabled in production until the endpoint and Cognee deletion path pass conformance testing.
 
 ## 15. AgentForge D1 ingestion model
 
-AgentForge stores the canonical payload unchanged in a quarantine layer before deriving product records. Raw payloads are untrusted data, never executable instructions.
+AgentForge does not durably store unscanned content merely to preserve the wire request unchanged. It preserves the request hash, schema version, IDs, receipt lineage, redaction metadata, and delivery audit, then performs a receiver-side secret and policy scan before durable content storage. The canonical sanitized copy is the input to normalization. High-risk content is rejected or placed in a separately access-controlled encrypted quarantine with a shorter retention window; it is never sent to Cognee. Raw payloads are untrusted data, never executable instructions.
 
 Required D1 entities:
 
@@ -523,19 +585,19 @@ Authorization: Bearer <server-managed-ingestion-token>
 }
 ```
 
-The endpoint exposes no secrets, participants, queues, database details, or provider configuration.
+The endpoint exposes no secrets, participants, queues, database details, or provider configuration. `purgeSupported` MUST remain `false` until receipt revocation, immediate access restriction, D1 deletion, Cognee deletion, retry, and completion-status fixtures pass the shared conformance suite. A configured destination MUST NOT be enabled for production while this value is `false`.
 
 ## 21. Audit and observability
 
 AgentForge records request/batch IDs, destination, non-secret credential ID, times, latency, status, byte size, schema, redaction count, accepted/duplicate/rejected/normalized/dead-letter/purged counts, normalization status, Cognee outbox status, and purge status. Routine logs do not contain raw content.
 
-Raw content access requires an authorized event organizer, an audit entry, and the approved retention window.
+Raw content access requires explicit event-scoped raw-data review permission, an audit entry, and the approved retention window. Organizer role alone does not automatically grant raw-content access.
 
 ## 22. Versioning and compatibility
 
 - This agreement uses semantic versioning.
 - ClawMax's wire schema remains `clawmax.activity-export/v1`.
-- Additive optional fields are backward compatible and preserved in raw storage.
+- Additive optional fields may be backward compatible, but remain excluded from normalization, display, and Cognee until accepted by a compatible schema review.
 - New required fields, changed meanings, or removed fields require a new schema and parallel compatibility window.
 - Unsupported major schemas are rejected rather than guessed.
 - A consent receipt can never be silently repointed to another destination.
@@ -601,23 +663,25 @@ Before production, both sides test valid batches; duplicate batch/event; stable 
 | ClawMax batch receiver | Not implemented | Required |
 | Partner credential management | Not implemented | Required |
 | Raw-ingestion quarantine | Not implemented | Required |
-| ClawMax receipt mapping | Not implemented | Required |
+| ClawMax receipt registration/revocation | Not implemented | Shared endpoint shape **OPEN WITH CLAWMAX**; required |
 | Purge and Cognee deletion propagation | Not implemented | Required before production |
 | Receiver conformance fixtures | Not implemented | Required |
 | 300-participant load test | Not run | Required |
 
 ## 27. Implementation order
 
-1. Add D1 migrations for destinations, credentials, connection codes, enrollments, receipts, batches, raw events, normalization state, and purge requests.
-2. Implement token issuance/verification, one-time enrollment exchange, and health verification.
-3. Implement batch limits, schema validation, enrollment/receipt checks, idempotency, and `202` acknowledgement.
-4. Implement asynchronous normalization and provenance links into existing Prompt, Progress, Feedback, and Cognee outbox records.
-5. Implement purge and deletion propagation through D1 and Cognee.
-6. Add organizer delivery-health, rejection, dead-letter, and purge views.
-7. Publish fixtures and run conformance tests.
-8. Give Max the sandbox endpoint, token, metadata, privacy copy, and test report.
-9. Add the AgentForge catalog/adapter PR to ClawMax without production secrets.
-10. Test 50, 100, and 300 synthetic participants, then rotate to a production token.
+1. Confirm the partner adapter, destination ID, enrollment, consent receipt, group scope, retry, and purge decisions with ClawMax.
+2. Publish the JSON Schema and shared request/response fixtures.
+3. Add D1 migrations for destinations, credentials, connection codes, enrollments, receipts, batches, raw events, normalization state, and purge requests.
+4. Implement token issuance/verification, one-time enrollment exchange, consent receipt registration/revocation, and health verification.
+5. Implement batch limits, schema validation, enrollment/receipt checks, hash-aware idempotency, and `202` acknowledgement.
+6. Implement asynchronous normalization and provenance links into existing Prompt, Progress, Feedback, and Cognee outbox records.
+7. Implement purge and deletion propagation through D1 and Cognee.
+8. Add organizer delivery-health, rejection, dead-letter, and purge views.
+9. Run conformance fixtures and 50, 100, and 300-participant load tests.
+10. Give Max the sandbox endpoint, token, metadata, privacy copy, and test report.
+11. Add the AgentForge catalog/adapter PR to ClawMax without production secrets.
+12. Rotate to a production token only after both sides approve the launch record.
 
 ## 28. Launch configuration record
 
