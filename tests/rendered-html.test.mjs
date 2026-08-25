@@ -76,14 +76,17 @@ test("ships real team collaboration, transparent learning models, and evidence-l
 });
 
 test("annotates Prompt adequacy and episode process evidence without a holistic learner score", async () => {
-  const [portal, assistant, coaching, cognee, schema, migration] = await Promise.all([
+  const [portal, assistant, coaching, cognee, organizer, schema, migration] = await Promise.all([
     source("app/portal.tsx"), source("app/api/assistant/route.ts"), source("app/api/coaching/route.ts"),
-    source("app/api/cognee/route.ts"), source("db/schema.ts"), source("drizzle/0013_prompt_coaching_v3.sql"),
+    source("app/api/cognee/route.ts"), source("app/api/organizer/route.ts"), source("db/schema.ts"), source("drizzle/0013_prompt_coaching_v3.sql"),
   ]);
   assert.match(portal, /Prompt Coach/);
   assert.match(portal, /Learning agency evidence/);
   assert.match(portal, /no holistic score/);
   assert.match(portal, /N\/O when unnecessary or missing/);
+  assert.match(portal, /SELECTED CONTEXT · RAW PARTICIPANT-SUPPLIED EVIDENCE/);
+  assert.match(portal, /HOW PROCESS COACHING WORKS/);
+  assert.match(portal, /what counts as Verification 3/);
   assert.match(assistant, /parent_prompt_event_id/);
   assert.match(coaching, /recorded_outcome/);
   assert.match(coaching, /superseded/);
@@ -92,6 +95,7 @@ test("annotates Prompt adequacy and episode process evidence without a holistic 
   assert.match(cognee, /Length, grammar sophistication, persona wording/);
   assert.match(cognee, /not_observable/);
   assert.match(cognee, /deterministic_non_prompt_gate/);
+  assert.match(organizer, /context_reference AS contextReference/);
   assert.match(schema, /promptCoachingActions/);
   assert.match(migration, /prompt_coaching_actions/);
 });

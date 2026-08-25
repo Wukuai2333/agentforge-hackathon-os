@@ -66,6 +66,7 @@ export async function GET(request: Request) {
     runtime.DB.prepare(`SELECT ev.id,ev.prompt_event_id AS promptEventId,ev.rubric_version AS rubricVersion,
       ev.evaluator,ev.evaluation_json AS evaluationJson,ev.total_score AS totalScore,ev.created_at AS createdAt,
       pe.anonymous_participant_id AS participantId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
+      pe.context_reference AS contextReference,
       pe.parent_prompt_event_id AS parentPromptEventId,parent.user_prompt AS parentPrompt,
       pe.outcome_status AS outcomeStatus,pe.outcome_evidence AS outcomeEvidence
       FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
@@ -90,6 +91,7 @@ export async function GET(request: Request) {
     promptEvaluations: promptEvaluations.results.map((row) => ({
       ...row, totalScore: row.totalScore ?? evaluationScore(row.evaluationJson),
       userPrompt: maskSensitive(String(row.userPrompt || "")),
+      contextReference: maskSensitive(String(row.contextReference || "")),
     })) });
 }
 
