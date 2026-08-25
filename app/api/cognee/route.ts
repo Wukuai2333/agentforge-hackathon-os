@@ -171,7 +171,7 @@ export async function POST(request: Request) {
   }
 
   if (input.action === "grade_prompts") {
-    const rubricVersion = "agentforge-prompt-coaching-v3";
+    const rubricVersion = "agentforge-process-coaching-v4";
     const prompts = await runtime.DB.prepare(`SELECT pe.id,pe.anonymous_participant_id AS participantId,
       pe.anonymous_team_id AS teamId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
       pe.task_reference AS taskReference,pe.context_reference AS contextReference,pe.response_text AS responseText,
@@ -190,8 +190,14 @@ export async function POST(request: Request) {
         || /^(hi|hello|hey|test|testing|ok|okay|thanks|thank you)[.!?]*$/iu.test(targetPrompt) || targetPrompt.length < 3;
       if (obviousNonPrompt) {
         const ruleResult = {
-          scores: { goal_clarity: 0, relevant_context: 0, constraints: 0, decomposition: 0, verification: 0, iteration: 0, efficiency: 0, learning_agency: 0, outcome: null },
-          total_score: 0, max_score: 32, coaching_status: "insufficient_evidence",
+          scores: { goal_task_specification: null, relevant_context: null, constraints_criteria: null, own_state_reasoning: null, strategic_request: null, focus_decomposition: null },
+          criterion_evidence: {},
+          process_indicators: {
+            verification: { score: null, status: "not_observable", evidence: [], rationale: "No substantive AI claim and learner response are available to evaluate." },
+            productive_iteration: { score: null, status: "not_observable", evidence: [], rationale: "No response-contingent revision is available to evaluate." },
+            learning_agency: { score: null, status: "insufficient_evidence", evidence: [], rationale: "Agency cannot be inferred from non-task text." },
+          },
+          coaching_status: "insufficient_evidence",
           strengths: [],
           weaknesses: ["The text does not contain an interpretable task, question, or learning goal."],
           improved_prompt: "State what you are trying to learn or build, the context that matters, the help you want, and how you will verify the result.",
@@ -203,10 +209,10 @@ export async function POST(request: Request) {
         await runtime.DB.batch([runtime.DB.prepare(`INSERT INTO prompt_evaluations
           (id,prompt_event_id,rubric_version,evaluator,evaluation_json,total_score,created_at)
           VALUES (?,?,?,?,?,?,?) ON CONFLICT(prompt_event_id,rubric_version) DO NOTHING`)
-          .bind(evaluationId, String(row.id), rubricVersion, "agentforge-rule-gate", JSON.stringify(ruleResult), 0, createdAt),
+          .bind(evaluationId, String(row.id), rubricVersion, "agentforge-rule-gate", JSON.stringify(ruleResult), null, createdAt),
         runtime.DB.prepare(`INSERT INTO cognee_sync_outbox (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
           VALUES (?,'coaching_action',?,'agentforge_learning_signals',?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
-          .bind(crypto.randomUUID(), evaluationId, JSON.stringify({ schema_version: "agentforge.prompt-coaching.v3", event_type: "prompt_coaching_evaluation", evaluation_id: evaluationId, prompt_event_id: row.id, participant_id: row.participantId, evaluator: "deterministic_non_prompt_gate", ...ruleResult, occurred_at: new Date(createdAt).toISOString(), evidence_type: "rule_based_inference" }), createdAt)]);
+          .bind(crypto.randomUUID(), evaluationId, JSON.stringify({ schema_version: "agentforge.process-coaching.v4", event_type: "process_coaching_annotation", evaluation_id: evaluationId, prompt_event_id: row.id, participant_id: row.participantId, evaluator: "deterministic_non_prompt_gate", ...ruleResult, occurred_at: new Date(createdAt).toISOString(), evidence_type: "rule_based_annotation" }), createdAt)]);
         graded++;
         continue;
       }
@@ -224,27 +230,31 @@ export async function POST(request: Request) {
       };
       const query = `Coach the participant using RAW_PROMPT and the linked evidence below. Do not evaluate this instruction text.
 
-RUBRIC ${rubricVersion}
-- goal_clarity: Is the learning or build goal understandable, scoped, and testable?
-- relevant_context: Does the Prompt include only the context necessary for this task?
-- constraints: Does it state useful requirements, boundaries, or output expectations?
-- decomposition: Does it break a complex task into learnable or executable parts when decomposition is needed?
-- verification: Does it ask for a check, test, evidence, or way to detect failure?
-- iteration: Does it use prior feedback or create a concrete next improvement loop?
-- efficiency: Is it concise relative to the task, without missing essential information or causing avoidable repeated calls?
-- learning_agency: Does it support understanding, reasoning, decision-making, or self-explanation instead of merely outsourcing the final work?
-- outcome: Did linked evidence show a useful result? Score null when no participant-reported or system-observed outcome exists.
+FRAMEWORK ${rubricVersion}
 
-GLOBAL SCALE: 0=absent or counterproductive; 1=weak; 2=partial; 3=effective; 4=strong and supported by linked evidence.
-Score each available dimension 0–4. Do not penalize a simple task for appropriately omitting unnecessary constraints or decomposition. Outcome anchors: 0=failed, 1=mostly failed, 2=partial result, 3=successful with minor gaps, 4=verified against the stated success criteria. Outcome must be null unless linked outcome evidence exists. max_score is 32 when outcome is null and 36 otherwise.
+Layer A — Prompt adequacy for the current goal. Score only the RAW_PROMPT, using 0=absent/counterproductive, 1=limited, 2=adequate, 3=strong. Use null when the criterion is not needed for this task or cannot be observed:
+- goal_task_specification: Is the current goal or request understandable?
+- relevant_context: Does the Prompt supply the task-relevant information that is not already visibly available?
+- constraints_criteria: When needed, does it state useful requirements, boundaries, or success criteria?
+- own_state_reasoning: Does it expose the learner's attempt, hypothesis, knowledge, or uncertainty when relevant?
+- strategic_request: Is the requested form of help appropriate for the stated learning or build goal?
+- focus_decomposition: When the task is complex, does it narrow or decompose the problem productively?
+
+Layer B — Episode-level provisional process indicators. These MUST NOT be inferred from an isolated Prompt when the required sequence is absent. Return each as {score, status, evidence, rationale}, where status is observed, not_observable, or insufficient_evidence:
+- productive_iteration, 0–4: 0=repetition without substantive change; 1=surface rephrasing; 2=response-contingent context/constraint/subgoal; 3=diagnoses a problem and changes strategy; 4=evidence-driven revision followed by verified resolution or improved understanding.
+- verification, 0–4. VERIFY SCORE 3 requires all three observable elements: (a) an identifiable substantive AI claim, (b) task-relevant evidence such as a test, source, calculation, requirement comparison, counterexample, or explained domain knowledge, and (c) a justified decision to accept, reject, qualify, or revise the claim. A request such as “are you sure?” without independent evidence is at most 2. Use not_observable—not 0—when no substantive claim, learner follow-up, tool result, or recorded verification opportunity exists.
+- learning_agency: do not produce one numeric trait score. Set score to null and summarize evidence separately for goal ownership, reasoning contribution, strategic help-seeking, decision ownership, and adaptive regulation. Missing evidence is not low agency.
+
+Layer C — Outcome evidence. Report participant-reported or system-observed outcome separately. Never include it in a Prompt score or claim that output improvement proves learning.
 
 Critical rules:
 1. Do not reward length, formality, or jargon. A short Prompt can be excellent when context is already available.
 2. Separate raw facts, participant-reported evidence, and AI inference. Never invent success or learning.
 3. Evaluate the Prompt in its real task context, but do not silently fill missing Prompt information from memory.
 4. learning_agency is coaching inference, not a judgment of motivation or ability.
-5. total_score is the sum of non-null scores. Use coaching_status: insufficient_evidence, emerging, developing, or effective. Never use letter grades.
-6. Return one JSON object only with: scores, total_score, max_score, coaching_status, strengths, weaknesses, improved_prompt, evidence_used, evidence_missing, inference_notice.
+5. Length, grammar sophistication, persona wording, formatting, politeness, and stylistic elaboration must not independently improve any annotation.
+6. Return no holistic score, percentage, grade, or student trait. Use coaching_status: insufficient_evidence, evidence_available, or review_recommended.
+7. Every non-null Prompt adequacy score must cite an exact transcript evidence span under criterion_evidence using the same criterion key. Return one JSON object only with: scores, criterion_evidence, process_indicators, outcome_evidence, coaching_status, strengths, weaknesses, improved_prompt, evidence_used, evidence_missing, inference_notice.
 
 RAW_PROMPT:
 <raw_prompt>${targetPrompt}</raw_prompt>
@@ -253,20 +263,19 @@ LINKED_EVIDENCE:
 ${JSON.stringify(evaluationInput)}`;
       const response = await fetch(`${base(runtime)}/api/v1/search`, { method: "POST", headers: headers(runtime, true), body: JSON.stringify({
         search_type: "GRAPH_COMPLETION", datasets: [dataset], query, top_k: 8,
-        system_prompt: "You are an evidence-grounded Prompt coach. Evaluate RAW_PROMPT in its linked learning context using rubric v3. Do not reward verbosity, do not invent outcomes, and return one JSON object only.",
+        system_prompt: "You are an evidence-grounded process annotation assistant. Apply framework v4 only to observable transcript evidence. Distinguish Prompt adequacy, episode-level process indicators, and outcomes. Abstain with not_observable or insufficient_evidence when required evidence is missing. Do not reward verbosity, infer stable learner traits, or invent learning outcomes. Return one JSON object only.",
       }) });
       if (!response.ok) continue;
       const result = await response.json();
       const raw = JSON.stringify(result).slice(0, 20000);
-      const totalMatch = raw.match(/total_score[^0-9]{0,24}(\d+)/);
       const evaluationId = crypto.randomUUID(), createdAt = Date.now();
       await runtime.DB.batch([runtime.DB.prepare(`INSERT INTO prompt_evaluations
         (id,prompt_event_id,rubric_version,evaluator,evaluation_json,total_score,created_at)
         VALUES (?,?,?,?,?,?,?) ON CONFLICT(prompt_event_id,rubric_version) DO NOTHING`)
-        .bind(evaluationId, String(row.id), rubricVersion, "cognee-graph-completion", raw, totalMatch ? Number(totalMatch[1]) : null, createdAt),
+        .bind(evaluationId, String(row.id), rubricVersion, "cognee-graph-completion", raw, null, createdAt),
       runtime.DB.prepare(`INSERT INTO cognee_sync_outbox (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
         VALUES (?,'coaching_action',?,'agentforge_learning_signals',?,'pending',0,?) ON CONFLICT(source_type,source_id) DO NOTHING`)
-        .bind(crypto.randomUUID(), evaluationId, JSON.stringify({ schema_version: "agentforge.prompt-coaching.v3", event_type: "prompt_coaching_evaluation", evaluation_id: evaluationId, prompt_event_id: row.id, participant_id: row.participantId, evaluator: "cognee-graph-completion", evaluation_json: raw, occurred_at: new Date(createdAt).toISOString(), evidence_type: "ai_inference" }), createdAt)]);
+        .bind(crypto.randomUUID(), evaluationId, JSON.stringify({ schema_version: "agentforge.process-coaching.v4", event_type: "process_coaching_annotation", evaluation_id: evaluationId, prompt_event_id: row.id, participant_id: row.participantId, evaluator: "cognee-graph-completion", evaluation_json: raw, occurred_at: new Date(createdAt).toISOString(), evidence_type: "provisional_ai_annotation" }), createdAt)]);
       graded++;
     }
     return Response.json({ graded, evaluated: prompts.results.length, rubricVersion });

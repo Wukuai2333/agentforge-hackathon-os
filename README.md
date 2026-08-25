@@ -155,7 +155,7 @@ Resource-intensive analytical work remains organizer-controlled. Organizers deci
 - synchronize queued memory;
 - detect class-level learning problems;
 - ask Cognee to interpret evidence behind those problems;
-- evaluate prompt quality for coaching;
+- annotate current-goal Prompt adequacy and episode-level process evidence for formative coaching;
 - review an intervention before updating participant support or tutorial content.
 
 This separation supports participants immediately while retaining human control over additional AI expenditure and consequential interpretation.
@@ -188,7 +188,7 @@ The current prototype is organized around the following questions:
 1. Can consented prompts reveal actionable learning bottlenecks during a live event?
 2. Can sequences of prompts, revisions, tests, and feedback provide useful evidence of progress?
 3. Does semantic retrieval improve the relevance of participant support?
-4. Can a transparent prompt rubric produce useful coaching without becoming a hidden grade?
+4. Can evidence-linked process annotations support useful coaching without becoming a hidden grade or an unvalidated learner score?
 5. Can organizers improve a tutorial during an event and measure the effect?
 6. What should be retained in a short-term participant model, and what requires longitudinal evidence?
 7. Do specialized tutor roles improve questioning, reflection, or evaluation compared with a single assistant?

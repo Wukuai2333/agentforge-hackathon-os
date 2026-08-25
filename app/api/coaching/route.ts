@@ -2,7 +2,7 @@ import { requireCurrentAccount } from "../../../lib/account";
 import { syncPendingMemory } from "../../../lib/cognee-delivery";
 
 type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
-const RUBRIC_VERSION = "agentforge-prompt-coaching-v3";
+const RUBRIC_VERSION = "agentforge-process-coaching-v4";
 
 function sanitize(value: string) {
   return value.replace(/sk-[A-Za-z0-9_-]{12,}/g, "[REDACTED API KEY]")
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     VALUES (?,?,?,?,?,?,?)`).bind(actionId, promptEventId, evaluationId, participantId, action, note || null, now));
   statements.push(runtime.DB.prepare(`INSERT INTO cognee_sync_outbox (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
     VALUES (?,'coaching_action',?,'agentforge_learning_signals',?,'pending',0,?)`).bind(crypto.randomUUID(), actionId, JSON.stringify({
-      schema_version: "agentforge.prompt-coaching.v3", event_type: "participant_coaching_action", coaching_action_id: actionId,
+      schema_version: "agentforge.process-coaching.v4", event_type: "participant_coaching_action", coaching_action_id: actionId,
       prompt_event_id: promptEventId, evaluation_id: evaluationId, participant_id: participantId, team_id: prompt.teamId,
       action, outcome_status: action === "recorded_outcome" ? input.outcomeStatus : undefined,
       participant_note: note || null, occurred_at: new Date(now).toISOString(), evidence_type: "participant_reported_fact",
