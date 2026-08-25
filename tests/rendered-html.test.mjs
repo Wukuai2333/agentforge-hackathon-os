@@ -87,6 +87,10 @@ test("annotates Prompt adequacy and episode process evidence without a holistic 
   assert.match(portal, /SELECTED CONTEXT · RAW PARTICIPANT-SUPPLIED EVIDENCE/);
   assert.match(portal, /HOW PROCESS COACHING WORKS/);
   assert.match(portal, /what counts as Verification 3/);
+  assert.match(portal, /WHY WE CHANGED THE RUBRIC/);
+  assert.match(portal, /Missing evidence is not converted into a low score/);
+  assert.match(portal, /THE SYSTEM DOES NOT CLAIM/);
+  assert.match(portal, /invalid server response/);
   assert.match(assistant, /parent_prompt_event_id/);
   assert.match(coaching, /recorded_outcome/);
   assert.match(coaching, /superseded/);
