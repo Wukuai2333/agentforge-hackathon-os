@@ -181,3 +181,15 @@ test("lets participants replace selected Ask AI context while the drawer stays o
   assert.match(styles, /\.assistant-backdrop[^}]*pointer-events:none/);
   assert.match(styles, /\.assistant[^}]*pointer-events:auto/);
 });
+
+test("ships a current official-docs Cognee onboarding path", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, /COGNEE ONBOARDING/);
+  assert.match(portal, /remember\(\).*recall\(\)/s);
+  assert.match(portal, /LEGACY \/ ADVANCED CONTROL/);
+  assert.match(portal, /add\(\).*cognify\(\).*search\(\)/s);
+  assert.match(portal, /Operational facts and semantic memory have different jobs/);
+  assert.match(portal, /docs\.cognee\.ai\/core-concepts\/main-operations\/remember/);
+  assert.match(portal, /COGNEE_API_KEY="your-key-from-cognee-cloud"/);
+  assert.match(portal, /Never paste this key into prompts/);
+});
