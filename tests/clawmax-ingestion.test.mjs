@@ -6,6 +6,11 @@ import {
   sanitizeClawMaxText,
   validateClawMaxBatch,
 } from "../lib/clawmax-ingestion.ts";
+import {
+  authorizeEventWithReceipt,
+  normalizeScopes,
+  splitAgentChat,
+} from "../lib/clawmax-partner.ts";
 
 function batch(overrides = {}) {
   return {
@@ -56,4 +61,35 @@ test("redacts common secrets and direct identifiers a second time", () => {
 test("compares scoped ingestion tokens without a plain-text early exit", async () => {
   assert.equal(await safeTokenMatch("partner-token", "partner-token"), true);
   assert.equal(await safeTokenMatch("partner-token", "different-token"), false);
+});
+
+test("authorizes only events covered by a matching active consent receipt", () => {
+  const event = batch().events[0];
+  const receipt = {
+    receiptId: event.consentReceiptId,
+    enrollmentId: "enrollment_test",
+    destinationId: event.destinationId,
+    workspaceId: event.workspaceId,
+    userId: event.userId,
+    scopesJson: JSON.stringify(["agent-chat"]),
+    status: "active",
+    consentedAt: Date.parse("2026-08-27T16:00:00.000Z"),
+    expiresAt: Date.parse("2026-08-28T16:00:00.000Z"),
+    participantId: "participant_test",
+    eventId: "hackathon_test",
+  };
+  assert.equal(authorizeEventWithReceipt(event, receipt, Date.parse("2026-08-27T17:00:00.000Z")).ok, true);
+  assert.match(authorizeEventWithReceipt({ ...event, source: "workflow" }, receipt, Date.parse("2026-08-27T17:00:00.000Z")).error, /does not include workflow/);
+  assert.match(authorizeEventWithReceipt(event, { ...receipt, status: "revoked" }, Date.parse("2026-08-27T17:00:00.000Z")).error, /revoked/);
+});
+
+test("keeps group activity disabled and normalizes current supported scopes", () => {
+  assert.deepEqual(normalizeScopes(["builder", "agent-chat", "group-chat", "agent-chat"]), ["agent-chat", "builder"]);
+});
+
+test("splits the current ClawMax visible chat transcript into Prompt and response", () => {
+  assert.deepEqual(splitAgentChat("User:\nHow do I test recall?\n\nAssistant:\nCreate a retrieval case."), {
+    prompt: "How do I test recall?",
+    response: "Create a retrieval case.",
+  });
 });

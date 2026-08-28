@@ -65,7 +65,9 @@ Both calls require the dedicated server-to-server bearer token. The receiver:
 7. stores sanitized evidence in a D1 quarantine; and
 8. returns accepted and duplicate event IDs.
 
-Quarantined events do **not** automatically become native AgentForge prompts or Cognee memory. That requires an explicit ClawMax-to-AgentForge participant enrollment mapping and an active AgentForge consent record.
+The next integration layer is now implemented in the working tree: participants generate a ten-minute, single-use connection code; ClawMax exchanges it server-to-server; ClawMax registers a destination-specific consent receipt; and only events matching an active enrollment and receipt are normalized. Authorized `agent-chat` evidence becomes an AgentForge Prompt plus Cognee outbox item. Authorized Builder/workflow evidence becomes Progress plus an outbox item. Unknown, expired, revoked, identity-mismatched, pre-consent, or out-of-scope events are rejected before durable acceptance.
+
+The public v59 transport test predates this strict authorization layer. A new Cloud end-to-end test must perform enrollment and consent registration before sending activity.
 
 ## Local SDK/source test
 
@@ -97,13 +99,13 @@ ClawMax Cloud cannot be tested only from the public repository. Dave or Max must
 
 The same receiver URL and dedicated test token are used. No OpenAI or Cognee key is given to ClawMax for this transport.
 
-## Production gates not covered by the first transport test
+## Production gates remaining after the first transport test
 
-- participant enrollment/identity mapping;
-- registration of complete consent receipt details with AgentForge;
-- purge propagation into normalized AgentForge data and Cognee;
+- named AgentForge adapter support inside ClawMax;
+- Cloud execution of enrollment, consent registration, delivery, and revocation;
+- execution of queued purge jobs across normalized AgentForge data and Cognee;
 - final retention and privacy text;
 - token rotation and instance allowlisting;
 - final batch/event limits and retry policy;
-- Organizer reviewer access; and
+- fine-grained raw-data reviewer access beyond the broad Organizer role; and
 - a 300-participant synthetic load test.

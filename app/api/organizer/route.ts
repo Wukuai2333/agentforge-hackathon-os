@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -78,6 +78,20 @@ export async function GET(request: Request) {
       FROM prompt_clusters ORDER BY created_at DESC LIMIT 50`).all(),
     runtime.DB.prepare(`SELECT e.signal_id AS signalId,p.id AS promptEventId,p.user_prompt AS userPrompt,p.status,p.error_code AS errorCode,p.user_feedback AS userFeedback,p.created_at AS createdAt
       FROM learning_signal_evidence e JOIN prompt_events p ON p.id=e.prompt_event_id ORDER BY e.created_at DESC LIMIT 200`).all(),
+    runtime.DB.prepare(`SELECT normalization_status AS status,COUNT(*) AS count
+      FROM clawmax_ingestion_events GROUP BY normalization_status`).all(),
+    runtime.DB.prepare(`SELECT ce.event_id AS eventId,ce.source,ce.occurred_at AS occurredAt,
+      ce.normalization_status AS normalizationStatus,ce.normalization_error AS normalizationError,
+      ce.participant_id AS participantId,ce.team_id AS teamId,ce.received_at AS receivedAt,
+      ep.display_name AS participantDisplayName
+      FROM clawmax_ingestion_events ce LEFT JOIN event_participants ep ON ep.id=ce.participant_id
+      ORDER BY ce.received_at DESC LIMIT 50`).all(),
+    runtime.DB.prepare(`SELECT e.id,e.destination_id AS destinationId,e.status,e.external_workspace_id AS workspaceId,
+      e.created_at AS createdAt,e.updated_at AS updatedAt,ep.display_name AS participantDisplayName,
+      COUNT(r.receipt_id) AS receiptCount,SUM(CASE WHEN r.status='active' THEN 1 ELSE 0 END) AS activeReceipts
+      FROM clawmax_partner_enrollments e JOIN event_participants ep ON ep.id=e.participant_id
+      LEFT JOIN clawmax_consent_receipts r ON r.enrollment_id=e.id
+      GROUP BY e.id ORDER BY e.updated_at DESC LIMIT 100`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
@@ -85,6 +99,7 @@ export async function GET(request: Request) {
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: settings || { assistantEnabled: 1, defaultTeamTokenQuota: 100000 },
     feedbacks: safeFeedbacks,
+    clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
     promptClusters: promptClusters.results, signalEvidence: signalEvidence.results,

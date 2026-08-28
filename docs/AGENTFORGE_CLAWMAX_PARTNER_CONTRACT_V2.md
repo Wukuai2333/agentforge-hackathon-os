@@ -6,13 +6,15 @@
 
 **Canonical activity schema:** `clawmax.activity-export/v1`
 
-**Proposed destination ID:** `NYU_agentforge` — final syntax open with ClawMax
+**Proposed destination ID:** environment-configured; final syntax open with ClawMax
 
 **Status:** AgentForge proposed implementation profile for ClawMax review; not yet mutually accepted
 
 **Last reviewed:** August 20, 2026
 
 This document defines the technical and operational contract for exporting explicitly consented participant activity from ClawMax to AgentForge. It is based on ClawMax's `PUBLIC_ACTIVITY_EXPORT_PARTNERS_2_0.md` platform contract and keeps ClawMax's canonical field names and wire format intact.
+
+> **Implementation note:** this contract also preserves the richer planning-model questions that still require joint review. The exact endpoints, compact v1 envelope, current scope names, and request examples implemented by AgentForge are frozen separately in `AGENTFORGE_CLAWMAX_IMPLEMENTATION_PROFILE_V1.md`. That profile is the conformance reference for the next Cloud test; conflicts in this broader draft remain review items rather than hidden assumptions.
 
 This is an interoperability contract, not a substitute for a privacy policy, data processing agreement, institutional review, or research consent. Those documents must be approved before production use.
 
@@ -113,14 +115,15 @@ AgentForge will provide the following values to the ClawMax integration owner. P
 
 | Field | AgentForge value |
 |---|---|
-| `destinationId` | `NYU_agentforge` |
+| `destinationId` | Environment-configured; proposed final value `agentforge` or `nyu-agentforge` (**OPEN WITH CLAWMAX**) |
 | Display name | `AgentForge` |
 | Purpose | `Hackathon learning support, progress evidence, prompt coaching, and improvement of event tutorials.` |
 | Supported schema | `clawmax.activity-export/v1` |
-| Batch endpoint | `https://<agentforge-production-host>/v1/clawmax/activity-events:batch` |
-| Purge endpoint | `https://<agentforge-production-host>/v1/clawmax/activity-events:purge` |
-| Enrollment exchange | `https://<agentforge-production-host>/v1/clawmax/enrollments:exchange` |
-| Health verification | `https://<agentforge-production-host>/v1/clawmax/activity-events:health` |
+| Batch endpoint | `POST https://<agentforge-production-host>/api/v1/clawmax/activity-events` |
+| Consent registration | `POST https://<agentforge-production-host>/api/v1/clawmax/consent-receipts` |
+| Consent revocation / purge request | `DELETE https://<agentforge-production-host>/api/v1/clawmax/consent-receipts` |
+| Enrollment exchange | `POST https://<agentforge-production-host>/api/v1/clawmax/enrollments/exchange` |
+| Health verification | `GET https://<agentforge-production-host>/api/v1/clawmax/activity-events` |
 | Authentication | Dedicated bearer token scoped to `activity:write` and `activity:purge` |
 | Privacy URL | `https://<agentforge-production-host>/privacy` |
 | Supported initial scopes | See Section 7 |
@@ -244,27 +247,26 @@ If the participant changes teams, AgentForge keeps the event identity stable and
 An authenticated AgentForge participant requests a short-lived, single-use connection code in AgentForge. The participant enters that code in ClawMax's AgentForge enrollment UI. ClawMax exchanges it server-to-server:
 
 ```http
-POST /v1/clawmax/enrollments:exchange
+POST /api/v1/clawmax/enrollments/exchange
 Authorization: Bearer <server-managed-ingestion-token>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "destinationId": "NYU_agentforge",
-  "connectionCode": "AF-7K3M-P9Q2",
+  "destinationId": "agentforge",
+  "connectionCode": "7K3MP9Q2AB",
   "workspaceId": "workspace_opaque",
-  "instanceId": "instance_opaque"
+  "userId": "clawmax_user_opaque"
 }
 ```
 
 ```json
 {
-  "destinationId": "NYU_agentforge",
-  "eventId": "agentforge-event-2026-09",
-  "scriptId": "personal-agent-hackathon",
-  "participantId": "afp_opaque_partner_scoped_id",
-  "expiresAt": "2026-09-27T03:00:00.000Z"
+  "destinationId": "agentforge",
+  "enrollmentId": "partner_scoped_enrollment_id",
+  "partnerParticipantId": "partner_scoped_enrollment_id",
+  "status": "active"
 }
 ```
 

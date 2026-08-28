@@ -466,3 +466,63 @@ export const eventAnnouncementHistory = sqliteTable("event_announcement_history"
   editorName: text("editor_name").notNull().default("Organizer"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (table) => [index("event_announcement_history_created_idx").on(table.createdAt)]);
+
+export const clawmaxEnrollmentCodes = sqliteTable("clawmax_enrollment_codes", {
+  id: text("id").primaryKey(),
+  codeHash: text("code_hash").notNull(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  destinationId: text("destination_id").notNull(),
+  status: text("status", { enum: ["active", "consumed", "expired", "revoked"] }).notNull().default("active"),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("idx_clawmax_enrollment_code_hash").on(table.codeHash),
+  index("idx_clawmax_enrollment_codes_participant").on(table.participantId, table.createdAt),
+]);
+
+export const clawmaxPartnerEnrollments = sqliteTable("clawmax_partner_enrollments", {
+  id: text("id").primaryKey(),
+  destinationId: text("destination_id").notNull(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  externalWorkspaceId: text("external_workspace_id").notNull(),
+  externalUserId: text("external_user_id").notNull(),
+  status: text("status", { enum: ["active", "revoked"] }).notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+}, (table) => [
+  uniqueIndex("idx_clawmax_enrollment_external_identity").on(table.destinationId, table.externalWorkspaceId, table.externalUserId),
+  index("idx_clawmax_enrollment_participant").on(table.participantId, table.status),
+]);
+
+export const clawmaxConsentReceipts = sqliteTable("clawmax_consent_receipts", {
+  receiptId: text("receipt_id").primaryKey(),
+  enrollmentId: text("enrollment_id").notNull().references(() => clawmaxPartnerEnrollments.id),
+  destinationId: text("destination_id").notNull(),
+  externalWorkspaceId: text("external_workspace_id").notNull(),
+  externalUserId: text("external_user_id").notNull(),
+  scopesJson: text("scopes_json").notNull(),
+  status: text("status", { enum: ["active", "revoked", "expired"] }).notNull().default("active"),
+  consentVersion: text("consent_version").notNull(),
+  consentedAt: integer("consented_at", { mode: "timestamp" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  payloadHash: text("payload_hash").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("idx_clawmax_receipts_enrollment_status").on(table.enrollmentId, table.status)]);
+
+export const clawmaxPurgeJobs = sqliteTable("clawmax_purge_jobs", {
+  id: text("id").primaryKey(),
+  receiptId: text("receipt_id").notNull().references(() => clawmaxConsentReceipts.receiptId),
+  status: text("status", { enum: ["pending", "processing", "completed", "error"] }).notNull().default("pending"),
+  rawEventsPurged: integer("raw_events_purged").notNull().default(0),
+  normalizedRecordsPurged: integer("normalized_records_purged").notNull().default(0),
+  cogneeRecordsPending: integer("cognee_records_pending").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+}, (table) => [index("idx_clawmax_purge_jobs_status").on(table.status, table.createdAt)]);

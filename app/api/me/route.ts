@@ -5,7 +5,7 @@ export async function GET(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
   if (auth.error) return auth.error;
   const account = auth.account!;
-  const [consent, projects, prompts, memory, progress, authoredNotes] = await Promise.all([
+  const [consent, projects, prompts, memory, progress, authoredNotes, clawmaxConnections, clawmaxEvents] = await Promise.all([
     env.DB.prepare("SELECT id,policy_version AS policyVersion,status,choices_json AS choicesJson,recorded_at AS recordedAt FROM consent_records WHERE event_participant_id=? ORDER BY recorded_at DESC").bind(account.participantId).all(),
     env.DB.prepare("SELECT id,title,problem,success_criteria AS successCriteria,status,created_at AS createdAt,updated_at AS updatedAt FROM agent_projects WHERE anonymous_participant_id=? ORDER BY updated_at DESC").bind(account.participantId).all(),
     env.DB.prepare(`SELECT p.id,p.page,p.tutorial_step AS tutorialStep,p.user_prompt AS userPrompt,p.response_text AS responseText,p.model_name AS modelName,p.input_tokens AS inputTokens,p.output_tokens AS outputTokens,p.status,p.user_feedback AS userFeedback,p.created_at AS createdAt,
@@ -14,6 +14,13 @@ export async function GET(request: Request) {
       c.status AS memoryStatus,c.synced_at AS memorySyncedAt FROM participant_model_entries m LEFT JOIN cognee_sync_outbox c ON c.source_type='participant_model' AND c.source_id=m.id WHERE m.anonymous_participant_id=? ORDER BY m.observed_at DESC`).bind(account.participantId).all(),
     env.DB.prepare("SELECT id,milestone,status,source,occurred_at AS occurredAt FROM event_progress_events WHERE event_participant_id=? ORDER BY occurred_at DESC").bind(account.participantId).all(),
     env.DB.prepare("SELECT id,team_id AS teamId,content,source_type AS sourceType,created_at AS createdAt,updated_at AS updatedAt FROM shared_notes WHERE author_id=? ORDER BY created_at DESC").bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,destination_id AS destinationId,external_workspace_id AS workspaceId,status,
+      created_at AS createdAt,updated_at AS updatedAt,revoked_at AS revokedAt
+      FROM clawmax_partner_enrollments WHERE participant_id=? ORDER BY created_at DESC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT event_id AS eventId,source,occurred_at AS occurredAt,subject_id AS subjectId,
+      consent_receipt_id AS consentReceiptId,content_text AS content,metadata_json AS metadataJson,
+      normalization_status AS normalizationStatus,normalization_error AS normalizationError,received_at AS receivedAt
+      FROM clawmax_ingestion_events WHERE participant_id=? ORDER BY received_at DESC`).bind(account.participantId).all(),
   ]);
   const payload = {
     exportedAt: new Date().toISOString(),
@@ -25,6 +32,7 @@ export async function GET(request: Request) {
     memory: memory.results,
     progress: progress.results,
     authoredTeamNotes: authoredNotes.results,
+    clawmax: { connections: clawmaxConnections.results, importedActivity: clawmaxEvents.results },
     deletion: { availableHere: false, note: "Single-record deletion is intentionally not enabled in this phase. Event retention and a reviewed deletion workflow will be handled separately." },
   };
   const url = new URL(request.url);
