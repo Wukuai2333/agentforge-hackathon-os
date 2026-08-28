@@ -6,6 +6,8 @@
 
 **Destination ID:** environment-configured; final value must be confirmed with ClawMax
 
+**Latest conformance run:** August 28, 2026 — local ClawMax `2.0.0` worker delivered an authorized `agent-chat` event to the public AgentForge v60 receiver and the event normalized successfully.
+
 This profile describes what the running code accepts. The broader Partner Contract remains the policy/design review document; this file is the concrete interoperability checklist for the current ClawMax source.
 
 ## Participant flow
@@ -17,6 +19,8 @@ This profile describes what the running code accepts. The broader Partner Contra
 5. ClawMax presents destination-specific sharing choices.
 6. ClawMax registers the resulting receipt with AgentForge.
 7. Only activity matching the active enrollment, receipt identity, scope, and time window is accepted.
+
+The enrollment exchange and remote consent receipt MUST use the same partner-facing opaque `workspaceId` and `userId` that ClawMax writes into exported events. Internal filesystem paths or other local workspace identifiers are not valid wire identities.
 
 No AgentForge password, Session token, email, internal user ID, or Partner bearer credential is returned to ClawMax.
 
@@ -115,6 +119,7 @@ Team membership is resolved at the activity timestamp. Sanitized raw evidence re
 - Use the versioned AgentForge batch endpoint and dedicated server secret.
 - Provide Cloud test access and delivery-status evidence.
 - Confirm the final destination ID and production hostname.
+- Confirm how the Partner adapter obtains the exported opaque workspace ID before enrollment and receipt registration. The current source stores an internal workspace path on the local consent record but emits `getOpaqueActivityWorkspaceId(...)` in activity events; using those two different values causes AgentForge's identity check to reject delivery with `403`.
 
 ## Remaining AgentForge production gates
 
