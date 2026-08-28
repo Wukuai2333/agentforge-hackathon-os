@@ -23,6 +23,10 @@ The first real local-to-public activity delivery passed. A local ClawMax worker 
 - Revoking a receipt immediately blocks later events with `403` and creates a pending purge job.
 - A real ClawMax worker can retry a retained outbox event after a temporary delivery failure.
 - Successful delivery returns the ClawMax outbox to zero pending events.
+- An invalid bearer token returns `401`.
+- An unsupported schema header and a 51-event batch return `400`.
+- A source outside the receipt scope and activity predating consent return `403`.
+- Reusing a completed `batchId` with different content returns `409`.
 
 ## Integration issue found
 
