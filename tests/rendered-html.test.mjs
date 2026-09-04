@@ -201,7 +201,9 @@ test("ships a consent-gated ClawMax enrollment and normalization path", async ()
     source("lib/clawmax-purge.ts"),
     source("drizzle/0021_clawmax_partner_enrollment.sql"),
   ]);
-  assert.match(portal, /ONE-TIME CONNECTION CODE/);
+  assert.match(portal, /Open ClawMax & connect/);
+  assert.match(portal, /No code, API key, or password needs to be copied/);
+  assert.doesNotMatch(portal, /ONE-TIME CONNECTION CODE/);
   assert.match(portal, /Review and accept the data policy/);
   assert.match(portal, /Read and review consent/);
   assert.match(portal, /Save consent/);

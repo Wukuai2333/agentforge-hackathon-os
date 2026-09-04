@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../../lib/account";
 import {
+  automaticClawMaxLaunchUrl,
   CLAWMAX_CONNECTION_CODE_TTL_MS,
   configuredDestination,
   randomConnectionCode,
@@ -35,6 +36,8 @@ export async function POST(request: Request) {
   const code = randomConnectionCode();
   const codeHash = await sha256(code);
   const destinationId = configuredDestination(runtime);
+  const launchUrl = automaticClawMaxLaunchUrl(runtime, code);
+  if (!launchUrl) return Response.json({ error: "ClawMax launch is not configured for this event." }, { status: 503 });
   await runtime.DB.batch([
     runtime.DB.prepare(`UPDATE clawmax_enrollment_codes SET status='revoked'
       WHERE participant_id=? AND destination_id=? AND status='active'`).bind(auth.account!.participantId, destinationId),
@@ -46,10 +49,8 @@ export async function POST(request: Request) {
       ),
   ]);
   return Response.json({
-    connectionCode: code,
+    launchUrl,
     destinationId,
-    expiresAt: now + CLAWMAX_CONNECTION_CODE_TTL_MS,
-    expiresInSeconds: CLAWMAX_CONNECTION_CODE_TTL_MS / 1000,
   }, { status: 201, headers: { "Cache-Control": "no-store" } });
 }
 

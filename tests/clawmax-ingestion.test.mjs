@@ -7,10 +7,17 @@ import {
   validateClawMaxBatch,
 } from "../lib/clawmax-ingestion.ts";
 import {
+  automaticClawMaxLaunchUrl,
   authorizeEventWithReceipt,
   normalizeScopes,
   splitAgentChat,
 } from "../lib/clawmax-partner.ts";
+
+test("creates an automatic ClawMax handoff without exposing a code in the page", () => {
+  const launchUrl = automaticClawMaxLaunchUrl({ DB: {}, CLAWMAX_APP_URL: "https://clawmax.example/builder" }, "TOKEN123");
+  assert.equal(launchUrl, "https://clawmax.example/builder#agentforge_enrollment=TOKEN123");
+  assert.equal(automaticClawMaxLaunchUrl({ DB: {}, CLAWMAX_APP_URL: "http://unsafe.example/builder" }, "TOKEN123"), null);
+});
 
 function batch(overrides = {}) {
   return {

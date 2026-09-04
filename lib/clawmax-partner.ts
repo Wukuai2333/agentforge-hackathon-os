@@ -4,6 +4,7 @@ export type ClawMaxPartnerRuntime = {
   DB: D1Database;
   CLAWMAX_INGESTION_TOKEN?: string;
   CLAWMAX_DESTINATION_ID?: string;
+  CLAWMAX_APP_URL?: string;
 };
 
 export const CLAWMAX_CONSENT_VERSION = "activity-export-consent/v1";
@@ -12,6 +13,20 @@ export const CLAWMAX_SUPPORTED_SCOPES = new Set(["agent-chat", "workflow", "buil
 
 export function configuredDestination(runtime: ClawMaxPartnerRuntime) {
   return runtime.CLAWMAX_DESTINATION_ID?.trim() || "agentforge";
+}
+
+export function automaticClawMaxLaunchUrl(runtime: ClawMaxPartnerRuntime, enrollmentToken: string) {
+  const configured = runtime.CLAWMAX_APP_URL?.trim() || "";
+  if (!configured) return null;
+  try {
+    const url = new URL(configured);
+    const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    if (url.protocol !== "https:" && !localHttp) return null;
+    url.hash = new URLSearchParams({ agentforge_enrollment: enrollmentToken }).toString();
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function bearerToken(request: Request) {

@@ -1404,8 +1404,6 @@ type ClawMaxEnrollment = { id: string; destinationId: string; workspaceId: strin
 
 function Settings({ setView }: { setView: (view: View) => void }) {
   const [enrollments, setEnrollments] = useState<ClawMaxEnrollment[]>([]);
-  const [connectionCode, setConnectionCode] = useState("");
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [connectionNotice, setConnectionNotice] = useState("");
   const [connectionError, setConnectionError] = useState("");
   const [connectionBusy, setConnectionBusy] = useState(false);
@@ -1426,15 +1424,14 @@ function Settings({ setView }: { setView: (view: View) => void }) {
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, []);
 
-  async function createConnectionCode() {
+  async function openClawMax() {
     setConnectionBusy(true); setConnectionError(""); setConnectionNotice("");
     try {
       const response = await fetch("/api/clawmax/enrollments", { method: "POST" });
-      const result = await response.json() as { connectionCode?: string; expiresAt?: number; error?: string };
-      if (!response.ok || !result.connectionCode) throw new Error(result.error || "A connection code could not be created.");
-      setConnectionCode(result.connectionCode); setExpiresAt(result.expiresAt || null);
-      setConnectionNotice("Enter this one-time code in ClawMax. It is shown only here and expires in 10 minutes.");
-    } catch (problem) { setConnectionError(problem instanceof Error ? problem.message : "A connection code could not be created."); }
+      const result = await response.json() as { launchUrl?: string; error?: string };
+      if (!response.ok || !result.launchUrl) throw new Error(result.error || "ClawMax could not be opened securely.");
+      window.location.assign(result.launchUrl);
+    } catch (problem) { setConnectionError(problem instanceof Error ? problem.message : "ClawMax could not be opened securely."); }
     finally { setConnectionBusy(false); }
   }
 
@@ -1445,16 +1442,16 @@ function Settings({ setView }: { setView: (view: View) => void }) {
       const response = await fetch("/api/clawmax/enrollments", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enrollmentId: active.id }) });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "ClawMax could not be disconnected.");
-      setConnectionCode(""); setExpiresAt(null); setConnectionNotice("ClawMax sharing has been revoked. Related purge work has been queued.");
+      setConnectionNotice("ClawMax sharing has been revoked. Related purge work has been queued.");
       await loadConnections();
     } catch (problem) { setConnectionError(problem instanceof Error ? problem.message : "ClawMax could not be disconnected."); }
     finally { setConnectionBusy(false); }
   }
 
   return <div className="settings-layout">
-    <section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>AgentForge never asks participants to paste a Partner API key. A short-lived code links your signed-in account to ClawMax server-to-server.</p>
+    <section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>Open ClawMax from AgentForge and your signed-in event identity is linked automatically. No code, API key, or password needs to be copied.</p>
       <article className="setting-card clawmax-connect-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax activity sharing</h3><p>Connect consented ClawMax prompts and build activity to your AgentForge event record.</p></div><span className={active ? "pill on-track" : "pill needs-help"}>{active ? "Connected" : "Not connected"}</span></div>
-        {active ? <><div className="connection-summary"><small>CONNECTED WORKSPACE</small><strong>{active.workspaceId}</strong><span>Only activity covered by an active, matching consent receipt is accepted.</span></div><div className="setting-actions"><small>You can stop future sharing at any time. Revocation immediately blocks new ingestion.</small><button className="outline-button danger" disabled={connectionBusy} onClick={() => void disconnect()}>{connectionBusy ? "Disconnecting…" : "Disconnect ClawMax"}</button></div></> : <><div className="connection-flow"><span><b>1</b>Generate a one-time code</span><i>→</i><span><b>2</b>Enter it in ClawMax</span><i>→</i><span><b>3</b>Review sharing consent</span></div>{connectionCode && <div className="connection-code"><small>ONE-TIME CONNECTION CODE</small><strong>{connectionCode}</strong><button className="outline-button" onClick={() => void navigator.clipboard.writeText(connectionCode)}>Copy code</button><span>{expiresAt ? `Expires ${new Date(expiresAt).toLocaleTimeString()}` : "Expires in 10 minutes"}</span></div>}<div className="setting-actions"><small>No passwords, AgentForge Sessions, or Partner secrets are sent to ClawMax.</small><button className="primary" disabled={connectionBusy} onClick={() => void createConnectionCode()}>{connectionBusy ? "Generating…" : connectionCode ? "Generate a new code" : "Connect ClawMax"}</button></div></>}
+        {active ? <><div className="connection-summary"><small>CONNECTED WORKSPACE</small><strong>{active.workspaceId}</strong><span>Only activity covered by an active, matching consent receipt is accepted.</span></div><div className="setting-actions"><small>You can stop future sharing at any time. Revocation immediately blocks new ingestion.</small><button className="outline-button danger" disabled={connectionBusy} onClick={() => void disconnect()}>{connectionBusy ? "Disconnecting…" : "Disconnect ClawMax"}</button></div></> : <><div className="connection-flow"><span><b>1</b>Open ClawMax</span><i>→</i><span><b>2</b>Review sharing scopes</span><i>→</i><span><b>3</b>Start building</span></div><div className="setting-actions"><small>Your identity is linked server-to-server. No passwords, Sessions, or Partner secrets are sent to ClawMax.</small><button className="primary" disabled={connectionBusy} onClick={() => void openClawMax()}>{connectionBusy ? "Opening ClawMax…" : "Open ClawMax & connect"}</button></div></>}
         {connectionNotice && <p className="connection-notice">✓ {connectionNotice}</p>}
         {connectionError && (connectionError.includes("privacy consent") ? <button className="consent-recovery-link" onClick={() => setView("policy")}><span>Consent required</span><strong>{connectionError}</strong><small>Review and accept the data policy →</small></button> : <p className="form-error">{connectionError}</p>)}
       </article>
