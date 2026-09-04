@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections, clawmaxPurges] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -92,6 +92,15 @@ export async function GET(request: Request) {
       FROM clawmax_partner_enrollments e JOIN event_participants ep ON ep.id=e.participant_id
       LEFT JOIN clawmax_consent_receipts r ON r.enrollment_id=e.id
       GROUP BY e.id ORDER BY e.updated_at DESC LIMIT 100`).all(),
+    runtime.DB.prepare(`SELECT p.id,p.receipt_id AS receiptId,p.status,p.raw_events_purged AS rawEventsPurged,
+      p.normalized_records_purged AS normalizedRecordsPurged,p.cognee_records_pending AS cogneeRecordsPending,
+      p.last_error AS lastError,p.created_at AS createdAt,p.completed_at AS completedAt,
+      e.external_workspace_id AS workspaceId,ep.display_name AS participantDisplayName
+      FROM clawmax_purge_jobs p
+      JOIN clawmax_consent_receipts r ON r.receipt_id=p.receipt_id
+      JOIN clawmax_partner_enrollments e ON e.id=r.enrollment_id
+      JOIN event_participants ep ON ep.id=e.participant_id
+      ORDER BY p.created_at DESC LIMIT 100`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
@@ -99,7 +108,7 @@ export async function GET(request: Request) {
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: settings || { assistantEnabled: 1, defaultTeamTokenQuota: 100000 },
     feedbacks: safeFeedbacks,
-    clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results },
+    clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results, purges: clawmaxPurges.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
     promptClusters: promptClusters.results, signalEvidence: signalEvidence.results,

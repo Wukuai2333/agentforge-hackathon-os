@@ -1,10 +1,14 @@
 # AgentForge × ClawMax Implementation Profile v1
 
-**Status:** implemented on the AgentForge side; named ClawMax adapter and Cloud conformance test pending
+**Status:** frozen compact-v1 profile; AgentForge receiver and named ClawMax adapter implemented; public deployment and Cloud conformance test pending
 
 **ClawMax source baseline:** dashboard `2.0.0`, compact `clawmax.activity-export/v1` envelope
 
-**Destination ID:** environment-configured; final value must be confirmed with ClawMax
+**Destination ID:** `agentforge`
+
+**Purpose:** Provide event-scoped learning support, progress evidence, prompt coaching, and improvement of hackathon tutorials.
+
+**Retention:** Event window plus up to 30 days, subject to the final reviewed participant disclosure.
 
 **Latest conformance run:** August 28, 2026 — local ClawMax `2.0.0` worker delivered an authorized `agent-chat` event to the public AgentForge v60 receiver and the event normalized successfully.
 
@@ -34,6 +38,7 @@ No AgentForge password, Session token, email, internal user ID, or Partner beare
 | Exchange one-time code | `POST /api/v1/clawmax/enrollments/exchange` | Partner bearer token |
 | Register consent receipt | `POST /api/v1/clawmax/consent-receipts` | Partner bearer token |
 | Revoke receipt / request purge | `DELETE /api/v1/clawmax/consent-receipts` | Partner bearer token |
+| Receipt and purge status | `GET /api/v1/clawmax/consent-receipts?receiptId=...` | Partner bearer token |
 | Deliver activity | `POST /api/v1/clawmax/activity-events` | Partner bearer token |
 | Receiver health/counts | `GET /api/v1/clawmax/activity-events` | Partner bearer token |
 
@@ -110,20 +115,25 @@ Accepted activity is normalized as follows:
 
 Team membership is resolved at the activity timestamp. Sanitized raw evidence remains linked to its source event, receipt, participant, native AgentForge record, normalization result, and request hash.
 
-## Still required from ClawMax
+## Implemented in the ClawMax follow-up branch
 
-- Add the named AgentForge destination to the Partner catalog and allowed-destination list.
-- Add AgentForge labels and consent copy in the ClawMax UI.
-- Call enrollment exchange before creating the AgentForge consent.
-- Register and revoke receipts remotely.
-- Use the versioned AgentForge batch endpoint and dedicated server secret.
-- Provide Cloud test access and delivery-status evidence.
-- Confirm the final destination ID and production hostname.
-- Confirm how the Partner adapter obtains the exported opaque workspace ID before enrollment and receipt registration. The current source stores an internal workspace path on the local consent record but emits `getOpaqueActivityWorkspaceId(...)` in activity events; using those two different values causes AgentForge's identity check to reject delivery with `403`.
+- Named `agentforge` destination, Partner setup, and consent/status UI.
+- Opaque workspace and user IDs reused consistently for enrollment, receipt, and exported events.
+- Server-side connection-code exchange and receipt registration/revocation.
+- Versioned batch delivery with durable retry and a dedicated credential.
+- Durable remote deletion retry after local revoke.
+
+## Still required from ClawMax / joint deployment
+
+- Merge the approved catalog/branding PR, then review and merge the stacked Activity Export follow-up.
+- Provide a Cloud test account or operator-assisted instance.
+- Configure the production AgentForge hostname and dedicated server secret.
+- Capture receiver-conformance and delivery-status evidence from the same Cloud build used for the event.
 
 ## Remaining AgentForge production gates
 
-- Execute and verify purge jobs against native AgentForge records and already-synced Cognee memory.
+- Deploy the receiver with `CLAWMAX_DESTINATION_ID=agentforge` (the current public environment still reports the older `clawmax-ai` value).
+- Verify local purge of raw and normalized records. Already-synced Cognee memory remains an explicit incomplete deletion state until record-addressable remote deletion is available.
 - Use separately rotatable credentials per Cloud environment or instance.
 - Add production alerting and a 300-participant synthetic load test.
 - Replace the prototype hostname and update Partner configuration without changing payload semantics.

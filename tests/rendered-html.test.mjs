@@ -195,17 +195,21 @@ test("ships a current official-docs Cognee onboarding path", async () => {
 });
 
 test("ships a consent-gated ClawMax enrollment and normalization path", async () => {
-  const [portal, receiver, enrollment, receipt, migration] = await Promise.all([
+  const [portal, receiver, enrollment, receipt, purge, migration] = await Promise.all([
     source("app/portal.tsx"), source("app/api/clawmax/activity-events/route.ts"),
     source("app/api/clawmax/enrollments/exchange/route.ts"), source("app/api/clawmax/consent-receipts/route.ts"),
+    source("lib/clawmax-purge.ts"),
     source("drizzle/0021_clawmax_partner_enrollment.sql"),
   ]);
   assert.match(portal, /ONE-TIME CONNECTION CODE/);
-  assert.match(portal, /Consent, delivery, and normalization/);
+  assert.match(portal, /Consent, delivery, normalization, and deletion/);
   assert.match(enrollment, /status='consumed'/);
   assert.match(receipt, /clawmax_consent_receipts/);
   assert.match(receiver, /authorizeEventWithReceipt/);
   assert.match(receiver, /source_platform: "clawmax"/);
+  assert.match(purge, /DELETE FROM clawmax_ingestion_events/);
+  assert.match(purge, /Remote deletion remains pending/);
+  assert.match(portal, /Revocation & deletion status/);
   assert.match(migration, /clawmax_partner_enrollments/);
   assert.match(migration, /clawmax_purge_jobs/);
 });

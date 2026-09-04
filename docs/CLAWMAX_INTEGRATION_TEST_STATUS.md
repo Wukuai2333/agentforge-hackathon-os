@@ -1,7 +1,8 @@
 # AgentForge x ClawMax Integration Test Status
 
-**Observed ClawMax source:** `Maximilien-ai/clawmax` `main` at commit `5d2a0b0aa683d5095623d48c3fd9b1b5a9b12bb6`  
-**Observed:** August 27, 2026  
+**Observed ClawMax source:** `Maximilien-ai/clawmax` `main` at commit `39ebbb8c`, rebased into `codex/agentforge-activity-export`
+
+**Observed:** September 4, 2026
 **ClawMax dashboard package version:** `2.0.0`  
 **Wire schema advertised by ClawMax:** `clawmax.activity-export/v1`
 
@@ -41,7 +42,7 @@ The planning document contains a richer illustrative canonical event with nested
 }
 ```
 
-AgentForge's first receiver intentionally accepts the implemented compact envelope. Before production, the parties must freeze whether the compact envelope or the richer planning schema is the compatibility baseline and publish a JSON Schema fixture.
+The compact envelope is now the frozen initial compatibility baseline. The richer planning schema remains future design material and is not accepted by the v1 receiver.
 
 The current ClawMax delivery function recreates `sentAt` on a retry while retaining the same `batchId`. AgentForge therefore computes batch idempotency from `batchId`, `destinationId`, and sanitized event content, excluding `sentAt`. This permits legitimate current retries while still rejecting a reused batch ID with changed events.
 
@@ -85,7 +86,15 @@ CLAWMAX_ACTIVITY_EXPORT_INTERVAL_MS=1000
 
 ### Named AgentForge destination
 
-Add `agentforge` to the ClawMax partner catalog, allowed-destination list, credential resolver, labels, and tests. Then bind the AgentForge receiver to destination `agentforge`. This is the correct user-facing end-to-end test and the patch that should become a ClawMax PR.
+The follow-up ClawMax branch now adds `agentforge` to the Partner catalog, allowed-destination list, credential resolver, labels, enrollment flow, receipt lifecycle, durable delivery worker, durable purge retry, and focused tests. The public AgentForge environment must still be changed from `clawmax-ai` to `agentforge` before this branch can pass a public end-to-end run.
+
+## September 4 local verification
+
+- ClawMax dashboard typecheck passed.
+- Partner definition, AgentForge adapter, generic Activity Export, worker edge, and UI source-contract tests passed.
+- AgentForge production build and receiver contract tests passed after adding deletion status.
+- AgentForge now purges receipt-linked D1 raw events, Prompt/Progress records, direct feedback/evaluation/coaching/model evidence, pending outbox records, and Assistant-derived Shared Space notes.
+- A purge stays visibly incomplete when Cognee records were already synced; the implementation does not report a false success.
 
 ## Cloud test prerequisites
 

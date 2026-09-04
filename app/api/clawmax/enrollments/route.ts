@@ -7,6 +7,7 @@ import {
   type ClawMaxPartnerRuntime,
 } from "../../../../lib/clawmax-partner";
 import { sha256 } from "../../../../lib/clawmax-ingestion";
+import { processClawMaxPurge } from "../../../../lib/clawmax-purge";
 
 export async function GET(request: Request) {
   const runtime = env as unknown as ClawMaxPartnerRuntime;
@@ -71,5 +72,16 @@ export async function DELETE(request: Request) {
     ...receipts.results.map((receipt) => runtime.DB.prepare(`INSERT OR IGNORE INTO clawmax_purge_jobs
       (id,receipt_id,status,created_at) VALUES (?,?,'pending',?)`).bind(`purge:${receipt.receiptId}`, receipt.receiptId, now)),
   ]);
-  return Response.json({ enrollmentId, status: "revoked", purgeJobs: receipts.results.length }, { status: 202 });
+  const purges = [];
+  for (const receipt of receipts.results) {
+    try {
+      purges.push(await processClawMaxPurge(runtime, receipt.receiptId));
+    } catch (problem) {
+      const message = problem instanceof Error ? problem.message : "Purge processing failed.";
+      await runtime.DB.prepare("UPDATE clawmax_purge_jobs SET status='error',last_error=? WHERE receipt_id=?")
+        .bind(message.slice(0, 1000), receipt.receiptId).run();
+      purges.push({ receiptId: receipt.receiptId, status: "error", lastError: message });
+    }
+  }
+  return Response.json({ enrollmentId, status: "revoked", purges }, { status: purges.every((purge) => purge?.status === "completed") ? 200 : 202 });
 }
