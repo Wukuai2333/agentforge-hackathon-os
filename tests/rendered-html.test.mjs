@@ -202,6 +202,9 @@ test("ships a consent-gated ClawMax enrollment and normalization path", async ()
     source("drizzle/0021_clawmax_partner_enrollment.sql"),
   ]);
   assert.match(portal, /ONE-TIME CONNECTION CODE/);
+  assert.match(portal, /Review and accept the data policy/);
+  assert.match(portal, /Read and review consent/);
+  assert.match(portal, /Save consent/);
   assert.match(portal, /Consent, delivery, normalization, and deletion/);
   assert.match(enrollment, /status='consumed'/);
   assert.match(receipt, /clawmax_consent_receipts/);

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
 type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
@@ -382,7 +382,7 @@ export function HackathonPortal() {
   }, []);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -437,7 +437,7 @@ export function HackathonPortal() {
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   async function toggleMilestone(index: number) {
     const completed = !done.includes(index);
@@ -481,7 +481,7 @@ export function HackathonPortal() {
 
   useEffect(() => {
     if (!portalUser || !perspectiveReady) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "settings"];
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const showingParticipant = portalUser.role !== "organizer" || organizerParticipantMode;
     const allowed = showingParticipant ? participantViews : organizerViews;
@@ -559,7 +559,8 @@ export function HackathonPortal() {
           {view === "data" && <MyData />}
           {view === "admin" && <Admin />}
           {view === "eventAdmin" && <EventManagement config={eventConfig} onSaved={setEventConfig} />}
-          {view === "settings" && <Settings />}
+          {view === "settings" && <Settings setView={setView} />}
+          {view === "policy" && <DataPolicy onBack={() => setView("settings")} />}
         </section>
       </main>
 
@@ -1374,9 +1375,34 @@ function MyData() {
   return <div className="my-data-page"><section className="my-data-hero"><div><span className="eyebrow">YOUR EVENT RECORD</span><h2>See what AgentForge remembers about your work.</h2><p>This page separates operational Prompt records from participant-model Memory. Cognee delivery status is shown explicitly.</p></div><a className="primary" href="/api/me?download=1" download>Export my data (.json) ↓</a></section><section className="identity-chain"><article><small>USER</small><strong>{data.account.displayName}</strong><span>{data.account.email}</span></article><i>→</i><article><small>EVENT REGISTRATION</small><strong>{data.relationship.eventRegistrationId.slice(0, 8)}…</strong><span>{data.account.role}</span></article><i>→</i><article><small>CONSENT</small><strong>{data.consent[0]?.status || "Not recorded"}</strong><span>{data.consent[0]?.policyVersion || "—"}</span></article><i>→</i><article><small>TEAM</small><strong>{data.account.teamName || "Solo / pending"}</strong><span>{data.account.inviteCode || "No invite code"}</span></article><i>→</i><article><small>PROJECT & EVIDENCE</small><strong>{data.projects.length} project · {data.prompts.length} prompts</strong><span>{synced} synced · {pending} pending</span></article></section><div className="my-data-grid"><section><header><div><span className="eyebrow">RAW OPERATIONAL RECORDS</span><h3>My prompts</h3></div><b>{data.prompts.length}</b></header>{data.prompts.length ? data.prompts.map((item) => <article className="data-record" key={item.id}><div><small>{item.page}{item.tutorialStep ? ` · ${item.tutorialStep}` : ""} · {new Date(item.createdAt).toLocaleString()}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.userPrompt}</strong>{item.responseText && <p>{item.responseText}</p>}<footer><span>{item.status} · {item.modelName || "No model"}</span><span>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output</span></footer></article>) : <p className="notes-empty">No prompts have been recorded for this account yet.</p>}</section><section><header><div><span className="eyebrow">COGNEE-BOUND PARTICIPANT MODEL</span><h3>My memory</h3></div><b>{data.memory.length}</b></header>{data.memory.length ? data.memory.map((item) => <article className="data-record memory-record" key={item.id}><div><small>{item.entryKind.toUpperCase()} · {item.category}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.statement}</strong><footer><span>Source: {item.sourceType}</span><span>{item.confirmedByParticipant ? "Participant-confirmed" : "Not confirmed"}</span></footer></article>) : <p className="notes-empty">No participant-model memory has been recorded yet.</p>}</section></div><section className="data-progress"><header><div><span className="eyebrow">APPEND-ONLY ACTIVITY</span><h3>Progress history</h3></div><b>{data.progress.length}</b></header>{data.progress.slice(0, 20).map((item) => <div key={item.id}><strong>{item.milestone}</strong><span>{item.status} · {item.source}</span><small>{new Date(item.occurredAt).toLocaleString()}</small></div>)}</section><p className="data-retention-note"><strong>Deletion note:</strong> single-record deletion is intentionally not enabled in this phase. The export is live; retention and deletion need a reviewed event policy so shared team evidence and audit history are handled consistently.</p></div>;
 }
 
+function DataPolicy({ onBack }: { onBack: () => void }) {
+  const [checks, setChecks] = useState([false, false, false]);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const choices = [
+    "I understand which prompts, responses, and activity may be recorded.",
+    "I understand that selected event data may be stored in Cognee for memory and learning analysis.",
+    "I will not enter credentials or sensitive personal information.",
+  ];
+
+  async function saveConsent() {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "accept_consent", choices: checks }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Consent could not be saved.");
+      setNotice("Consent saved. You can now connect ClawMax.");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Consent could not be saved."); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="policy-review-page"><header><div><span className="eyebrow">DATA POLICY & CONSENT</span><h2>Know what is shared before you connect.</h2><p>This is the same policy used during onboarding. You can review it at any time and explicitly record the current consent version here.</p></div><button className="outline-button" onClick={onBack}>← Back to Settings</button></header><div className="policy-review-grid"><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span>{demoPrivacySections.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h3>Review and confirm</h3><p>Each choice is stored with the policy version and timestamp. Organizer configuration never replaces participant consent.</p>{choices.map((item, index) => <label key={item}><input type="checkbox" checked={checks[index]} onChange={() => setChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{notice && <p className="policy-save-notice">✓ {notice}</p>}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !checks.every(Boolean)} onClick={() => void saveConsent()}>{saving ? "Saving consent…" : "Save consent"}</button><button className="consent-signout" onClick={onBack}>Review only · return without changes</button><small>Consent version: AF-DEMO-2026-07</small></aside></div></div>;
+}
+
 type ClawMaxEnrollment = { id: string; destinationId: string; workspaceId: string; status: "active" | "revoked"; createdAt: number; updatedAt: number };
 
-function Settings() {
+function Settings({ setView }: { setView: (view: View) => void }) {
   const [enrollments, setEnrollments] = useState<ClawMaxEnrollment[]>([]);
   const [connectionCode, setConnectionCode] = useState("");
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
@@ -1425,7 +1451,17 @@ function Settings() {
     finally { setConnectionBusy(false); }
   }
 
-  return <div className="settings-layout"><section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>AgentForge never asks participants to paste a Partner API key. A short-lived code links your signed-in account to ClawMax server-to-server.</p><article className="setting-card clawmax-connect-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax activity sharing</h3><p>Connect consented ClawMax prompts and build activity to your AgentForge event record.</p></div><span className={active ? "pill on-track" : "pill needs-help"}>{active ? "Connected" : "Not connected"}</span></div>{active ? <><div className="connection-summary"><small>CONNECTED WORKSPACE</small><strong>{active.workspaceId}</strong><span>Only activity covered by an active, matching consent receipt is accepted.</span></div><div className="setting-actions"><small>You can stop future sharing at any time. Revocation immediately blocks new ingestion.</small><button className="outline-button danger" disabled={connectionBusy} onClick={() => void disconnect()}>{connectionBusy ? "Disconnecting…" : "Disconnect ClawMax"}</button></div></> : <><div className="connection-flow"><span><b>1</b>Generate a one-time code</span><i>→</i><span><b>2</b>Enter it in ClawMax</span><i>→</i><span><b>3</b>Review sharing consent</span></div>{connectionCode && <div className="connection-code"><small>ONE-TIME CONNECTION CODE</small><strong>{connectionCode}</strong><button className="outline-button" onClick={() => void navigator.clipboard.writeText(connectionCode)}>Copy code</button><span>{expiresAt ? `Expires ${new Date(expiresAt).toLocaleTimeString()}` : "Expires in 10 minutes"}</span></div>}<div className="setting-actions"><small>No passwords, AgentForge Sessions, or Partner secrets are sent to ClawMax.</small><button className="primary" disabled={connectionBusy} onClick={() => void createConnectionCode()}>{connectionBusy ? "Generating…" : connectionCode ? "Generate a new code" : "Connect ClawMax"}</button></div></>}{connectionNotice && <p className="connection-notice">✓ {connectionNotice}</p>}{connectionError && <p className="form-error">{connectionError}</p>}</article><article className="setting-card"><div className="setting-title"><span className="service-mark green">C</span><div><h3>Cognee memory</h3><p>Authorized evidence is queued through the AgentForge server after identity and consent validation.</p></div><span className="pill on-track">Server managed</span></div><p className="settings-explanation">Sanitized ClawMax evidence is retained with its receipt, source, and normalization status. Only mapped and authorized evidence becomes Prompt/Progress data and enters the Cognee outbox.</p></article></section><aside className="privacy-card"><span>WHAT WE TRACK</span><h3>Prompt analytics, with boundaries.</h3>{["Partner-scoped participant and workspace IDs", "Consented Prompt and visible assistant response", "Agent, workflow, page, and tutorial context", "Timestamps, delivery, and normalization status", "Linked progress and participant feedback"].map((item) => <p key={item}>✓ {item}</p>)}<hr />{["AgentForge or ClawMax passwords", "Partner API keys", "Activity created before consent", "Group content in the initial launch", "Unselected local files or unrelated browsing"].map((item) => <p className="not-tracked" key={item}>× {item}</p>)}<button className="outline-button">Read data policy</button></aside></div>;
+  return <div className="settings-layout">
+    <section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>AgentForge never asks participants to paste a Partner API key. A short-lived code links your signed-in account to ClawMax server-to-server.</p>
+      <article className="setting-card clawmax-connect-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax activity sharing</h3><p>Connect consented ClawMax prompts and build activity to your AgentForge event record.</p></div><span className={active ? "pill on-track" : "pill needs-help"}>{active ? "Connected" : "Not connected"}</span></div>
+        {active ? <><div className="connection-summary"><small>CONNECTED WORKSPACE</small><strong>{active.workspaceId}</strong><span>Only activity covered by an active, matching consent receipt is accepted.</span></div><div className="setting-actions"><small>You can stop future sharing at any time. Revocation immediately blocks new ingestion.</small><button className="outline-button danger" disabled={connectionBusy} onClick={() => void disconnect()}>{connectionBusy ? "Disconnecting…" : "Disconnect ClawMax"}</button></div></> : <><div className="connection-flow"><span><b>1</b>Generate a one-time code</span><i>→</i><span><b>2</b>Enter it in ClawMax</span><i>→</i><span><b>3</b>Review sharing consent</span></div>{connectionCode && <div className="connection-code"><small>ONE-TIME CONNECTION CODE</small><strong>{connectionCode}</strong><button className="outline-button" onClick={() => void navigator.clipboard.writeText(connectionCode)}>Copy code</button><span>{expiresAt ? `Expires ${new Date(expiresAt).toLocaleTimeString()}` : "Expires in 10 minutes"}</span></div>}<div className="setting-actions"><small>No passwords, AgentForge Sessions, or Partner secrets are sent to ClawMax.</small><button className="primary" disabled={connectionBusy} onClick={() => void createConnectionCode()}>{connectionBusy ? "Generating…" : connectionCode ? "Generate a new code" : "Connect ClawMax"}</button></div></>}
+        {connectionNotice && <p className="connection-notice">✓ {connectionNotice}</p>}
+        {connectionError && (connectionError.includes("privacy consent") ? <button className="consent-recovery-link" onClick={() => setView("policy")}><span>Consent required</span><strong>{connectionError}</strong><small>Review and accept the data policy →</small></button> : <p className="form-error">{connectionError}</p>)}
+      </article>
+      <article className="setting-card"><div className="setting-title"><span className="service-mark green">C</span><div><h3>Cognee memory</h3><p>Authorized evidence is queued through the AgentForge server after identity and consent validation.</p></div><span className="pill on-track">Server managed</span></div><p className="settings-explanation">Sanitized ClawMax evidence is retained with its receipt, source, and normalization status. Only mapped and authorized evidence becomes Prompt/Progress data and enters the Cognee outbox.</p></article>
+    </section>
+    <aside className="privacy-card"><span>WHAT WE TRACK</span><h3>Prompt analytics, with boundaries.</h3>{["Partner-scoped participant and workspace IDs", "Consented Prompt and visible assistant response", "Agent, workflow, page, and tutorial context", "Timestamps, delivery, and normalization status", "Linked progress and participant feedback"].map((item) => <p key={item}>✓ {item}</p>)}<hr />{["AgentForge or ClawMax passwords", "Partner API keys", "Activity created before consent", "Group content in the initial launch", "Unselected local files or unrelated browsing"].map((item) => <p className="not-tracked" key={item}>× {item}</p>)}<button className="policy-read-button" onClick={() => setView("policy")}><span>DATA POLICY</span><strong>Read and review consent</strong><small>See what is collected, excluded, retained, and shared →</small></button></aside>
+  </div>;
 }
 
 type CoachingItem = { id: string; parentPromptEventId?: string; conversationId?: string; page: string; tutorialStep?: string; taskReference?: string; userPrompt: string; responseText?: string; userFeedback?: string; outcomeStatus?: "worked" | "partial" | "not_worked"; outcomeEvidence?: string; createdAt: number; parentPrompt?: string; evaluationId?: string; rubricVersion?: string; evaluator?: string; evaluationJson?: string; totalScore?: number; evaluatedAt?: number };
