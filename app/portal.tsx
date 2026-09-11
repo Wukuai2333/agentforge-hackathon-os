@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CompanyBrainTutorial } from "./company-brain-tutorial";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
 type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
@@ -325,6 +326,7 @@ export function HackathonPortal() {
   const [assistantWorking, setAssistantWorking] = useState(false);
   const [viewRestored, setViewRestored] = useState(false);
   const [assistantContext, setAssistantContext] = useState("");
+  const [assistantDraft, setAssistantDraft] = useState<{ text: string; nonce: number } | undefined>();
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
   const [surveyAnswers, setSurveyAnswers] = useState<string[]>([]);
@@ -382,7 +384,7 @@ export function HackathonPortal() {
   }, []);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -437,7 +439,7 @@ export function HackathonPortal() {
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
-  const title = useMemo(() => view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
+  const title = useMemo(() => view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
   async function toggleMilestone(index: number) {
     const completed = !done.includes(index);
@@ -481,7 +483,7 @@ export function HackathonPortal() {
 
   useEffect(() => {
     if (!portalUser || !perspectiveReady) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const showingParticipant = portalUser.role !== "organizer" || organizerParticipantMode;
     const allowed = showingParticipant ? participantViews : organizerViews;
@@ -551,6 +553,7 @@ export function HackathonPortal() {
           {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
           {view === "clawmaxTutorial" && <ClawMaxTutorial />}
           {view === "cogneeTutorial" && <CogneeTutorial setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} />}
+          {view === "companyBrainTutorial" && <CompanyBrainTutorial onBack={() => setView("learn")} onAsk={(text, context) => { setAssistantContext(context); setAssistantDraft({ text, nonce: Date.now() }); openAssistant(); }} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
           {view === "coach" && <PromptCoach />}
           {view === "demo" && <Demo />}
@@ -564,7 +567,7 @@ export function HackathonPortal() {
         </section>
       </main>
 
-      {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} /></div>}
+      {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} draft={assistantDraft} /></div>}
       {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
       {announcementHistoryOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAnnouncementHistoryOpen(false)}><section className="participant-announcement-history" role="dialog" aria-modal="true" aria-labelledby="announcement-history-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">EVENT UPDATES</span><h2 id="announcement-history-title">Published announcements</h2></div><button type="button" onClick={() => setAnnouncementHistoryOpen(false)} aria-label="Close announcement history">×</button></header><div>{publishedAnnouncements.length ? publishedAnnouncements.map((item) => <article key={item.id}><small>{new Date(item.createdAt).toLocaleString()}</small><p>{item.announcementText}</p></article>) : <p className="notes-empty">No earlier published announcements yet.</p>}</div></section></div>}
     </div>
@@ -659,7 +662,7 @@ function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers, 
 function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) => void; setView: (view: View) => void }) {
   return <>
     <div className="page-intro"><div><span className="eyebrow">YOUR HACKATHON LEARNING HUB</span><h2>Learn only what you need to build.</h2><p>Start with the tool you need now, then return to the build path below. Each tutorial is designed around something your team can demonstrate—not passive reading.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
-    <section className="tutorial-library" aria-label="Tutorial library">
+    <section className="tutorial-library company-brain-library" aria-label="Tutorial library">
       <button className="tutorial-library-card clawmax" onClick={() => setView("clawmaxTutorial")}>
         <span className="library-mark">C</span><span className="library-status pending">WAITING FOR MAX</span>
         <small>CLAWMAX · OFFICIAL MATERIALS PENDING</small><h3>Build your ClawMax agent</h3>
@@ -671,6 +674,12 @@ function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) 
         <small>COGNEE · OFFICIAL DOCS GUIDED PATH</small><h3>Build memory you can actually verify</h3>
         <p>Learn the current Remember and Recall workflow, then understand where Add, Cognify, Search, sessions, REST, and MCP fit.</p>
         <b>Start Cognee onboarding →</b>
+      </button>
+      <button className="tutorial-library-card cognee" onClick={() => setView("companyBrainTutorial")}>
+        <span className="library-mark">CB</span><span className="library-status available">3 BUILD EXERCISES</span>
+        <small>COMPANY BRAIN · COGNEE + CLAWMAX</small><h3>Build with shared knowledge</h3>
+        <p>Build a GTM brief, prospect researcher, or purchase-order workflow. Formulate, Engage, Verify, and Integrate—with practical Ask AI questions.</p>
+        <b>Open Company Brain tutorial →</b>
       </button>
     </section>
     <section className="tutor-team-note">
@@ -1540,9 +1549,10 @@ function PromptCoach() {
 
 type AssistantHistoryMessage = { id: string; parentPromptEventId?: string; conversationId?: string; page: string; tutorialStep?: string; taskReference?: string; userPrompt: string; responseText?: string; modelName?: string; inputTokens?: number; outputTokens?: number; status: string; errorCode?: string; outcomeStatus?: string; outcomeEvidence?: string; createdAt: number };
 
-function Assistant({ close, page, selectedContext }: { close: () => void; page: string; selectedContext: string }) {
+function Assistant({ close, page, selectedContext, draft }: { close: () => void; page: string; selectedContext: string; draft?: { text: string; nonce: number } }) {
   const conversationId = useRef("");
   const [text, setText] = useState("");
+  useEffect(() => { if (draft) setText(draft.text); }, [draft]);
   const [answer, setAnswer] = useState("");
   const [submittedPrompt, setSubmittedPrompt] = useState("");
   const [promptEventId, setPromptEventId] = useState("");
