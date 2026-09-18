@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./selection-clawmax.css";
+import "./account-onboarding.css";
 
 export const metadata: Metadata = {
   title: "AgentForge — Personal Agent Hackathon",

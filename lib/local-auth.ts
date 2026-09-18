@@ -16,7 +16,7 @@ function base64ToBytes(value: string) {
   return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
 }
 
-function randomToken(byteLength = 32) {
+export function randomToken(byteLength = 32) {
   const bytes = new Uint8Array(byteLength);
   crypto.getRandomValues(bytes);
   return bytesToBase64(bytes).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");

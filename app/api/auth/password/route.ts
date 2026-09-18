@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { authAudit, createLocalSession, hashPassword, normalizedEmail, sessionCookie, sha256, verifyPassword } from "../../../../lib/local-auth";
+import { emailConfigured, issueAuthEmail, type AuthEmailRuntime } from "../../../../lib/auth-email";
 
-type Runtime = { DB: D1Database; ORGANIZER_EMAILS?: string };
+type Runtime = AuthEmailRuntime & { ORGANIZER_EMAILS?: string };
 type Input = { action?: "signup" | "signin"; email?: string; password?: string; displayName?: string };
 type Credential = {
   userId: string;
@@ -12,6 +13,7 @@ type Credential = {
   passwordIterations: number;
   failedAttemptCount: number;
   lockedUntil: number | null;
+  emailVerifiedAt: number | null;
 };
 
 const SIGNUPS_PER_IP_PER_HOUR = 100;
@@ -44,6 +46,7 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
   const displayName = (input.displayName || "").trim().slice(0, 100);
   const password = input.password || "";
   if (!await registrationIsOpen(runtime.DB)) return Response.json({ error: "Registration is currently closed." }, { status: 403 });
+  if (!emailConfigured(runtime)) return Response.json({ error: "Registration email is not configured yet. Please contact an Organizer." }, { status: 503 });
   if (!/^\S+@\S+\.\S+$/.test(email)) return Response.json({ error: "Enter a valid email address." }, { status: 400 });
   if (!displayName) return Response.json({ error: "Enter the name your teammates should see." }, { status: 400 });
   if (password.length < 12) return Response.json({ error: "Use a password with at least 12 characters." }, { status: 400 });
@@ -83,9 +86,14 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
     await authAudit(runtime.DB, request, "signup", "database_conflict", { email });
     return Response.json({ error: "This email is already registered. Sign in instead." }, { status: 409 });
   }
-  const session = await createLocalSession(runtime.DB, request, userId);
-  await authAudit(runtime.DB, request, "signup", "success", { email, userId, sessionId: session.id });
-  return jsonWithSession({ authenticated: true, identity: { subject: userId, email, displayName, provider: "password" } }, session.token, 201);
+  try { await issueAuthEmail(runtime, { id: userId, email, displayName }, "verify_email"); }
+  catch (problem) {
+    console.error("Verification email failed", problem);
+    await authAudit(runtime.DB, request, "signup", "email_delivery_failed", { email, userId });
+    return Response.json({ verificationRequired: true, email, error: "Your account was created, but the verification email could not be sent. Use Resend verification or contact an Organizer." }, { status: 503 });
+  }
+  await authAudit(runtime.DB, request, "signup", "success", { email, userId });
+  return Response.json({ authenticated: false, verificationRequired: true, email, message: "Check your email to verify your AgentForge account." }, { status: 201 });
 }
 
 async function signin(request: Request, runtime: Runtime, input: Input) {
@@ -101,7 +109,7 @@ async function signin(request: Request, runtime: Runtime, input: Input) {
 
   const credential = await runtime.DB.prepare(`SELECT u.id AS userId,u.email,u.display_name AS displayName,
       c.password_hash AS passwordHash,c.password_salt AS passwordSalt,c.password_iterations AS passwordIterations,
-      c.failed_attempt_count AS failedAttemptCount,c.locked_until AS lockedUntil
+      c.failed_attempt_count AS failedAttemptCount,c.locked_until AS lockedUntil,u.email_verified_at AS emailVerifiedAt
     FROM app_users u JOIN user_credentials c ON c.user_id=u.id WHERE u.email=? LIMIT 1`)
     .bind(email).first<Credential>();
   const valid = credential && (!credential.lockedUntil || credential.lockedUntil <= now)
@@ -115,6 +123,11 @@ async function signin(request: Request, runtime: Runtime, input: Input) {
     }
     await authAudit(runtime.DB, request, "signin", "invalid_credentials", { email, userId: credential?.userId });
     return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
+  }
+
+  if (!credential.emailVerifiedAt) {
+    await authAudit(runtime.DB, request, "signin", "email_unverified", { email, userId: credential.userId });
+    return Response.json({ error: "Verify your email before signing in.", code: "email_verification_required", verificationRequired: true, email }, { status: 403 });
   }
 
   await runtime.DB.batch([

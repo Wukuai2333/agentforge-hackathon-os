@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
   }
   const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role,
-    ep.consent_version AS consentVersion, ep.joined_at AS joinedAt, t.name AS teamName,
+    ep.consent_version AS consentVersion, ep.joined_at AS joinedAt, t.id AS teamId, t.name AS teamName,
     COALESCE((SELECT cr.status FROM consent_records cr WHERE cr.event_participant_id=ep.id ORDER BY cr.recorded_at DESC LIMIT 1),
       CASE WHEN ep.consent_version='pending' THEN 'pending' ELSE 'accepted' END) AS consentStatus,
     MAX(ep.updated_at,
@@ -39,11 +39,15 @@ export async function GET(request: Request) {
     LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
     LEFT JOIN teams t ON t.id=tm.team_id
     ORDER BY ep.joined_at DESC LIMIT 500`).all();
+  const teams = await runtime.DB.prepare(`SELECT t.id,t.name,t.workspace_kind AS workspaceKind,
+    COUNT(tm.id) AS activeMembers FROM teams t LEFT JOIN team_memberships tm ON tm.team_id=t.id AND tm.ended_at IS NULL
+    WHERE t.event_id=? AND t.status='active' GROUP BY t.id ORDER BY t.workspace_kind,t.name`)
+    .bind(organizer.eventId).all();
   const announcementHistory = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText, action, active,
     editor_name AS editorName, created_at AS createdAt FROM event_announcement_history ORDER BY created_at DESC LIMIT 100`).all();
   const organizerGrants = await runtime.DB.prepare(`SELECT email,status,granted_by_name AS grantedByName,
     created_at AS createdAt,updated_at AS updatedAt FROM organizer_access_grants ORDER BY updated_at DESC`).all();
-  return Response.json({ config, participants: participants.results, organizerGrants: organizerGrants.results,
+  return Response.json({ config, participants: participants.results, teams: teams.results, organizerGrants: organizerGrants.results,
     serverOrganizerEmails: [...serverOrganizerEmails(runtime)], currentOrganizerParticipantId: organizer.participantId,
     announcementHistory: announcementHistory.results, publishedAnnouncements: publishedAnnouncements.results });
 }
@@ -124,7 +128,37 @@ export async function PATCH(request: Request) {
   const runtime = env as unknown as Runtime;
   const organizer = await organizerAccount(request, runtime);
   if (!organizer) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { participantId?: string; role?: "participant" | "organizer" };
+  const input = await request.json() as { action?: "update_role" | "move_team"; participantId?: string; role?: "participant" | "organizer"; targetTeamId?: string; createPersonal?: boolean; reason?: string };
+  if (input.action === "move_team") {
+    if (!input.participantId || (!input.targetTeamId && !input.createPersonal)) return Response.json({ error: "Participant and destination workspace are required." }, { status: 400 });
+    const target = await runtime.DB.prepare(`SELECT ep.id,ep.event_id AS eventId,ep.display_name AS displayName,
+      tm.team_id AS currentTeamId FROM event_participants ep LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
+      WHERE ep.id=?`).bind(input.participantId).first<{ id: string; eventId: string; displayName: string; currentTeamId: string | null }>();
+    if (!target) return Response.json({ error: "Registered participant not found." }, { status: 404 });
+    let destinationId = input.targetTeamId || "";
+    const now = Date.now();
+    if (input.createPersonal) {
+      destinationId = crypto.randomUUID();
+      await runtime.DB.prepare(`INSERT INTO teams
+        (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
+        VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
+        .bind(destinationId, target.eventId, target.id, `${target.displayName}'s personal workspace`, target.eventId, now, now).run();
+    } else {
+      const destination = await runtime.DB.prepare("SELECT id FROM teams WHERE id=? AND event_id=? AND status='active'")
+        .bind(destinationId, target.eventId).first<{ id: string }>();
+      if (!destination) return Response.json({ error: "The destination team is not active in this event." }, { status: 404 });
+    }
+    if (target.currentTeamId === destinationId) return Response.json({ saved: true, unchanged: true, participantId: target.id, teamId: destinationId });
+    await runtime.DB.batch([
+      ...(target.currentTeamId ? [runtime.DB.prepare("UPDATE team_memberships SET ended_at=?,end_reason='switched' WHERE participant_id=? AND ended_at IS NULL").bind(now, target.id)] : []),
+      runtime.DB.prepare(`INSERT INTO team_memberships (id,event_id,team_id,participant_id,membership_role,joined_at)
+        VALUES (?,?,?,?,?,?)`).bind(crypto.randomUUID(), target.eventId, destinationId, target.id, input.createPersonal ? "creator" : "member", now),
+      runtime.DB.prepare(`INSERT INTO team_membership_events
+        (id,event_id,participant_id,from_team_id,to_team_id,action,change_reason,occurred_at) VALUES (?,?,?,?,?,'switched',?,?)`)
+        .bind(crypto.randomUUID(), target.eventId, target.id, target.currentTeamId, destinationId, input.reason?.trim().slice(0, 300) || "Organizer-managed correction", now),
+    ]);
+    return Response.json({ saved: true, participantId: target.id, teamId: destinationId, reason: input.reason?.trim().slice(0, 300) || "Organizer-managed correction", changedBy: organizer.participantId });
+  }
   if (!input.participantId || !["participant", "organizer"].includes(input.role || "")) {
     return Response.json({ error: "Participant and role are required." }, { status: 400 });
   }

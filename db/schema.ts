@@ -20,6 +20,7 @@ export const appUsers = sqliteTable("app_users", {
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
   role: text("role", { enum: ["participant", "organizer"] }).notNull().default("participant"),
+  emailVerifiedAt: integer("email_verified_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 }, (table) => [
@@ -83,6 +84,19 @@ export const authAuditLogs = sqliteTable("auth_audit_logs", {
   index("auth_audit_logs_type_created_idx").on(table.eventType, table.createdAt),
 ]);
 
+export const authActionTokens = sqliteTable("auth_action_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => appUsers.id),
+  purpose: text("purpose", { enum: ["verify_email", "reset_password"] }).notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("auth_action_tokens_user_purpose_idx").on(table.userId, table.purpose, table.createdAt),
+  index("auth_action_tokens_expires_idx").on(table.expiresAt),
+]);
+
 export const assistantActiveLeases = sqliteTable("assistant_active_leases", {
   requestId: text("request_id").primaryKey(),
   participantId: text("participant_id").notNull(),
@@ -130,6 +144,8 @@ export const teams = sqliteTable("teams", {
   name: text("name").notNull(),
   inviteCode: text("invite_code").unique(),
   status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  workspaceKind: text("workspace_kind", { enum: ["team", "personal"] }).notNull().default("team"),
+  inviteRotatedAt: integer("invite_rotated_at", { mode: "timestamp" }),
   archivedAt: integer("archived_at", { mode: "timestamp" }),
   dataExpiresAt: integer("data_expires_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -173,6 +189,7 @@ export const teamMembershipEvents = sqliteTable("team_membership_events", {
   fromTeamId: text("from_team_id").references(() => teams.id),
   toTeamId: text("to_team_id").references(() => teams.id),
   action: text("action", { enum: ["created", "joined", "left", "switched", "removed"] }).notNull(),
+  changeReason: text("change_reason"),
   occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
 }, (table) => [index("team_membership_events_participant_idx").on(table.participantId)]);
 
@@ -313,7 +330,12 @@ export const sharedNoteRevisions = sqliteTable("shared_note_revisions", {
 export const organizerSettings = sqliteTable("organizer_settings", {
   id: text("id").primaryKey(),
   assistantEnabled: integer("assistant_enabled", { mode: "boolean" }).notNull().default(true),
+  eventTokenQuota: integer("event_token_quota").notNull().default(5000000),
   defaultTeamTokenQuota: integer("default_team_token_quota").notNull().default(100000),
+  defaultParticipantTokenQuota: integer("default_participant_token_quota").notNull().default(25000),
+  perMinuteRequestLimit: integer("per_minute_request_limit").notNull().default(10),
+  perHourRequestLimit: integer("per_hour_request_limit").notNull().default(100),
+  maxConcurrentRequests: integer("max_concurrent_requests").notNull().default(2),
   maxOutputTokens: integer("max_output_tokens").notNull().default(1500),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -481,6 +503,36 @@ export const clawmaxEnrollmentCodes = sqliteTable("clawmax_enrollment_codes", {
   uniqueIndex("idx_clawmax_enrollment_code_hash").on(table.codeHash),
   index("idx_clawmax_enrollment_codes_participant").on(table.participantId, table.createdAt),
 ]);
+
+export const participantOnboardingProfiles = sqliteTable("participant_onboarding_profiles", {
+  participantId: text("participant_id").primaryKey().references(() => eventParticipants.id),
+  onboardingVersion: text("onboarding_version").notNull(),
+  answersJson: text("answers_json").notNull(),
+  responseLength: text("response_length", { enum: ["brief", "balanced", "detailed"] }).notNull().default("brief"),
+  interactionMode: text("interaction_mode", { enum: ["guide", "collaborate", "direct"] }).notNull().default("guide"),
+  completedAt: integer("completed_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const participantOnboardingDrafts = sqliteTable("participant_onboarding_drafts", {
+  participantId: text("participant_id").primaryKey().references(() => eventParticipants.id),
+  onboardingVersion: text("onboarding_version").notNull(),
+  answersJson: text("answers_json").notNull(),
+  currentStep: integer("current_step").notNull().default(0),
+  responseLength: text("response_length", { enum: ["brief", "balanced", "detailed"] }).notNull().default("brief"),
+  interactionMode: text("interaction_mode", { enum: ["guide", "collaborate", "direct"] }).notNull().default("guide"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const participantOnboardingRevisions = sqliteTable("participant_onboarding_revisions", {
+  id: text("id").primaryKey(),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  answersJson: text("answers_json").notNull(),
+  responseLength: text("response_length", { enum: ["brief", "balanced", "detailed"] }).notNull(),
+  interactionMode: text("interaction_mode", { enum: ["guide", "collaborate", "direct"] }).notNull(),
+  changeSource: text("change_source").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [index("participant_onboarding_revisions_participant_idx").on(table.participantId, table.createdAt)]);
 
 export const clawmaxPartnerEnrollments = sqliteTable("clawmax_partner_enrollments", {
   id: text("id").primaryKey(),

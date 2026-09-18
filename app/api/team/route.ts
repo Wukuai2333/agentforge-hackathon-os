@@ -35,6 +35,13 @@ export async function POST(request: Request) {
   const owner = await env.DB.prepare("SELECT membership_role AS membershipRole FROM team_memberships WHERE participant_id=? AND team_id=? AND ended_at IS NULL").bind(account.participantId, account.teamId).first<{ membershipRole: string }>();
   if (owner?.membershipRole !== "creator") return Response.json({ error: "Only the team creator can regenerate the invite code." }, { status: 403 });
   const inviteCode = crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
-  await env.DB.prepare("UPDATE teams SET invite_code=?,updated_at=? WHERE id=?").bind(inviteCode, Date.now(), account.teamId).run();
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE team_invites SET revoked_at=? WHERE team_id=? AND revoked_at IS NULL").bind(now, account.teamId),
+    env.DB.prepare("UPDATE teams SET invite_code=?,invite_rotated_at=?,updated_at=? WHERE id=?").bind(inviteCode, now, now, account.teamId),
+    env.DB.prepare(`INSERT INTO team_invites (id,event_id,team_id,code,created_by_participant_id,expires_at,created_at)
+      VALUES (?,?,?,?,?,(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?)`)
+      .bind(crypto.randomUUID(), account.eventId, account.teamId, inviteCode, account.participantId, account.eventId, now),
+  ]);
   return Response.json({ account: await currentAccount(env.DB, auth.identity!), inviteCode });
 }

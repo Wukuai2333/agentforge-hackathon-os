@@ -141,15 +141,59 @@ test("uses AgentForge password authentication with audited abuse controls", asyn
   assert.doesNotMatch(localAuth + session, /console\.log\([^)]*password/i);
 });
 
-test("admits up to two concurrent Ask AI requests per participant", async () => {
-  const [assistant, schema, migration] = await Promise.all([
-    source("app/api/assistant/route.ts"), source("db/schema.ts"), source("drizzle/0019_assistant_concurrency_two.sql"),
+test("enforces organizer-controlled hierarchical AI access without exposing provider keys", async () => {
+  const [portal, assistant, organizer, schema, migration, envExample] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/assistant/route.ts"), source("app/api/organizer/route.ts"),
+    source("db/schema.ts"), source("drizzle/0022_hierarchical_ai_allocation.sql"), source(".env.example"),
   ]);
-  assert.match(assistant, /MAX_CONCURRENT_REQUESTS_PER_PARTICIPANT = 2/);
+  assert.match(portal, /Allocation & Usage Policy/);
+  assert.match(portal, /Participants never receive provider keys/);
+  assert.match(assistant, /providerKeyPool/);
+  assert.match(assistant, /stableKeyIndex/);
+  assert.match(assistant, /event_token_quota/);
+  assert.match(assistant, /default_participant_token_quota/);
   assert.match(assistant, /SELECT COUNT\(\*\) FROM assistant_active_leases/);
-  assert.match(assistant, /You already have two AI requests running/);
+  assert.match(assistant, /maximum number of AI requests running/);
+  assert.match(organizer, /providerKeyCount/);
+  assert.match(envExample, /OPENAI_API_KEYS_JSON=\[\]/);
   assert.match(schema, /requestId: text\("request_id"\)\.primaryKey\(\)/);
-  assert.match(migration, /assistant_active_leases_participant_expires_idx/);
+  assert.match(migration, /max_concurrent_requests/);
+});
+
+test("explains FEVI to participants and opens ClawMax through a server handoff", async () => {
+  const [portal, styles] = await Promise.all([source("app/portal.tsx"), source("app/globals.css")]);
+  assert.match(portal, /FEVI keeps you in control of the AI/);
+  assert.match(portal, /Formulate/);
+  assert.match(portal, /Engage/);
+  assert.match(portal, /Verify/);
+  assert.match(portal, /Integrate/);
+  assert.match(portal, />Open ClawMax</);
+  assert.match(portal, /\/api\/clawmax\/enrollments/);
+  assert.match(styles, /\.assistant\{width:min\(520px,100%\)\}/);
+  assert.match(styles, /\.answer p\{font-size:15px/);
+});
+
+test("runs a participant-reported onboarding interview before the project canvas", async () => {
+  const [portal, onboarding, assistant, account, schema, migration, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/onboarding/route.ts"), source("app/api/assistant/route.ts"),
+    source("lib/account.ts"), source("db/schema.ts"), source("drizzle/0023_participant_interviewer.sql"), source("app/globals.css"),
+  ]);
+  assert.match(portal, /PARTICIPANT INTERVIEW/);
+  assert.match(portal, /NYU Tandon student/);
+  assert.match(portal, /Prior agent-building experience|agent_experience/);
+  assert.match(portal, /How should Ask AI work with you/);
+  assert.match(portal, /Response style/);
+  assert.match(portal, /autoFocus/);
+  assert.match(onboarding, /participant_reported_fact/);
+  assert.match(onboarding, /onboarding_interview/);
+  assert.match(onboarding, /response_length/);
+  assert.match(assistant, /lengthInstruction/);
+  assert.match(assistant, /modeInstruction/);
+  assert.match(account, /onboardingCompleted/);
+  assert.match(schema, /participantOnboardingProfiles/);
+  assert.match(migration, /participant_onboarding_profiles/);
+  assert.match(styles, /interviewer-breathe/);
+  assert.match(styles, /prefers-reduced-motion/);
 });
 
 test("manages registered users with server roles and enforces registration state", async () => {
@@ -175,11 +219,27 @@ test("manages registered users with server roles and enforces registration state
 });
 
 test("lets participants replace selected Ask AI context while the drawer stays open", async () => {
-  const [portal, styles] = await Promise.all([source("app/portal.tsx"), source("app/globals.css")]);
-  assert.match(portal, /closest\("input, textarea, button, a, \.assistant"\)/);
+  const [portal, styles, selectionStyles] = await Promise.all([source("app/portal.tsx"), source("app/globals.css"), source("app/selection-clawmax.css")]);
+  assert.match(portal, /closest\("input, textarea, button, a, \.assistant, \.selection-ask-action"\)/);
+  assert.match(portal, /Ask Agent about this/);
+  assert.match(portal, /getRangeAt\(0\)\.getBoundingClientRect\(\)/);
+  assert.match(portal, /setAssistantContext\(selectionAction\.text\)/);
+  assert.doesNotMatch(portal, /setAssistantContext\(selected\); openAssistant\(\)/);
   assert.match(portal, /Highlight different text on the page to replace this context/);
   assert.match(styles, /\.assistant-backdrop[^}]*pointer-events:none/);
   assert.match(styles, /\.assistant[^}]*pointer-events:auto/);
+  assert.match(selectionStyles, /\.selection-ask-action\{position:fixed/);
+});
+
+test("explains the temporary ClawMax SDK BYOK setup without promising the Cloud flow", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, /TEMPORARY SDK TEST FLOW/);
+  assert.match(portal, /Open BYOK/);
+  assert.match(portal, /Add your provider key/);
+  assert.match(portal, /Select a default model/);
+  assert.match(portal, /Test the provider connection/);
+  assert.match(portal, /Start and test the agent/);
+  assert.match(portal, /should not assume they will need personal keys until that workflow is confirmed/);
 });
 
 test("ships a current official-docs Cognee onboarding path", async () => {
@@ -217,4 +277,54 @@ test("ships a consent-gated ClawMax enrollment and normalization path", async ()
   assert.match(portal, /Revocation & deletion status/);
   assert.match(migration, /clawmax_partner_enrollments/);
   assert.match(migration, /clawmax_purge_jobs/);
+});
+
+test("verifies email and resets passwords with hashed one-time tokens", async () => {
+  const [password, emailRoute, emailService, migration, portal] = await Promise.all([
+    source("app/api/auth/password/route.ts"), source("app/api/auth/email/route.ts"), source("lib/auth-email.ts"),
+    source("drizzle/0024_auth_recovery_onboarding_team.sql"), source("app/portal.tsx"),
+  ]);
+  assert.match(password, /email_verification_required/);
+  assert.match(password, /Registration email is not configured yet/);
+  assert.match(emailService, /verify_email.*24 \* 60 \* 60 \* 1000/s);
+  assert.match(emailService, /reset_password.*30 \* 60 \* 1000/s);
+  assert.match(emailService, /sha256\(token\)/);
+  assert.doesNotMatch(emailService, /token\s*:\s*token/);
+  assert.match(emailRoute, /revoked_at=.*auth_sessions|UPDATE auth_sessions SET revoked_at/s);
+  assert.match(emailRoute, /link is invalid or has expired/);
+  assert.match(emailRoute, /link has already been used/);
+  assert.match(migration, /auth_action_tokens/);
+  assert.match(portal, /Forgot password/);
+  assert.match(portal, /Resend verification email/);
+});
+
+test("saves resumable onboarding and keeps participant-controlled revision history", async () => {
+  const [portal, onboarding, migration] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/onboarding/route.ts"), source("drizzle/0024_auth_recovery_onboarding_team.sql"),
+  ]);
+  assert.match(portal, /Save & continue later/);
+  assert.match(portal, /Required/);
+  assert.match(portal, /Optional/);
+  assert.match(portal, /My profile & response preferences/);
+  assert.match(portal, /participant_settings/);
+  assert.match(onboarding, /participant_onboarding_drafts/);
+  assert.match(onboarding, /participant_onboarding_revisions/);
+  assert.match(onboarding, /Please answer every required onboarding question/);
+  assert.match(migration, /participant_onboarding_drafts/);
+  assert.match(migration, /participant_onboarding_revisions/);
+});
+
+test("enforces one active team and organizer-audited team moves", async () => {
+  const [account, event, portal, migration] = await Promise.all([
+    source("app/api/account/route.ts"), source("app/api/event/route.ts"), source("app/portal.tsx"), source("drizzle/0024_auth_recovery_onboarding_team.sql"),
+  ]);
+  assert.match(account, /You already have an active workspace/);
+  assert.match(account, /personal workspace/);
+  assert.match(event, /action === "move_team"/);
+  assert.match(event, /end_reason='switched'/);
+  assert.match(event, /change_reason/);
+  assert.match(portal, /Create personal workspace/);
+  assert.match(portal, /Earlier records stay linked to the previous team/);
+  assert.match(migration, /workspace_kind/);
+  assert.match(migration, /change_reason/);
 });

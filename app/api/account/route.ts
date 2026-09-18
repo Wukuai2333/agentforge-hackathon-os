@@ -95,6 +95,11 @@ export async function POST(request: Request) {
   const auth = await requireCurrentAccount(request, runtime.DB);
   if (auth.error) return auth.error;
   const account = auth.account!, now = Date.now();
+  const event = await runtime.DB.prepare("SELECT ends_at AS endsAt,status FROM hackathon_events WHERE id=?").bind(account.eventId).first<{ endsAt: number; status: string }>();
+  const teamChangeRequested = ["create_team", "join_team", "continue_solo", "leave_team"].includes(input.action || "");
+  if (teamChangeRequested && (event?.status === "ended" || event?.status === "archived" || Number(event?.endsAt || 0) <= now)) {
+    return Response.json({ error: "Team membership is locked because this event has ended." }, { status: 409 });
+  }
   if (input.action === "accept_consent") {
     if (!input.choices || input.choices.length !== 3 || !input.choices.every(Boolean)) return Response.json({ error: "All consent choices must be confirmed." }, { status: 400 });
     await runtime.DB.batch([
@@ -102,24 +107,34 @@ export async function POST(request: Request) {
       runtime.DB.prepare("UPDATE event_participants SET consent_version=?,updated_at=? WHERE id=?").bind(POLICY_VERSION, now, account.participantId),
     ]);
   } else if (input.action === "create_team") {
+    if (account.teamId) return Response.json({ error: "You already have an active workspace. Ask an Organizer before changing teams." }, { status: 409 });
     const name = input.teamName?.trim().slice(0, 80) || "";
     if (!name) return Response.json({ error: "Team name is required." }, { status: 400 });
     const teamId = crypto.randomUUID(), inviteCode = crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
     await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,data_expires_at,created_at,updated_at)
       VALUES (?,?,?,?,?,'active',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`).bind(teamId, account.eventId, account.participantId, name, inviteCode, account.eventId, now, now).run();
+    await runtime.DB.prepare(`INSERT INTO team_invites (id,event_id,team_id,code,created_by_participant_id,expires_at,created_at)
+      VALUES (?,?,?,?,?,(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?)`).bind(crypto.randomUUID(), account.eventId, teamId, inviteCode, account.participantId, account.eventId, now).run();
     await moveTeam(runtime, account, teamId, account.teamId ? "switched" : "created", "creator");
   } else if (input.action === "join_team") {
     const code = input.inviteCode?.trim().toUpperCase() || "";
-    const team = await runtime.DB.prepare("SELECT id FROM teams WHERE event_id=? AND invite_code=? AND status='active'").bind(account.eventId, code).first<{ id: string }>();
-    if (!team) return Response.json({ error: "That team invite code is not valid." }, { status: 404 });
+    const team = await runtime.DB.prepare(`SELECT t.id FROM team_invites i JOIN teams t ON t.id=i.team_id
+      WHERE i.event_id=? AND i.code=? AND i.revoked_at IS NULL AND i.expires_at>? AND t.status='active' LIMIT 1`).bind(account.eventId, code, now).first<{ id: string }>();
+    if (!team) return Response.json({ error: "That invite code is invalid, expired, or has been replaced." }, { status: 404 });
+    if (account.teamId === team.id) return Response.json({ account, alreadyMember: true, message: "You are already a member of this team." });
+    if (account.teamId) return Response.json({ error: "You already have an active workspace. Ask an Organizer before changing teams." }, { status: 409 });
     await moveTeam(runtime, account, team.id, account.teamId ? "switched" : "joined", "member");
-  } else if (input.action === "leave_team") {
-    if (account.teamId) {
-      await runtime.DB.batch([
-        runtime.DB.prepare("UPDATE team_memberships SET ended_at=?,end_reason='left' WHERE participant_id=? AND ended_at IS NULL").bind(now, account.participantId),
-        runtime.DB.prepare("INSERT INTO team_membership_events (id,event_id,participant_id,from_team_id,to_team_id,action,occurred_at) VALUES (?,?,?,?,NULL,'left',?)").bind(crypto.randomUUID(), account.eventId, account.participantId, account.teamId, now),
-      ]);
+    await runtime.DB.prepare("UPDATE team_invites SET use_count=use_count+1 WHERE code=?").bind(code).run();
+  } else if (input.action === "continue_solo") {
+    if (!account.teamId) {
+      const teamId = crypto.randomUUID();
+      await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
+        VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
+        .bind(teamId, account.eventId, account.participantId, `${account.displayName}'s personal workspace`, account.eventId, now, now).run();
+      await moveTeam(runtime, account, teamId, "created", "creator");
     }
+  } else if (input.action === "leave_team") {
+    return Response.json({ error: "Ask an Organizer to change your active team so earlier Shared Space access remains auditable." }, { status: 409 });
   } else return Response.json({ error: "Unknown account action." }, { status: 400 });
   return Response.json({ account: await currentAccount(runtime.DB, auth.identity!) });
 }

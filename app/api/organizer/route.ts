@@ -1,7 +1,15 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; COGNEE_API_KEY?: string };
+type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string };
+
+function configuredProviderKeyCount(runtime: Runtime) {
+  try {
+    const parsed = JSON.parse(runtime.OPENAI_API_KEYS_JSON || "[]");
+    if (Array.isArray(parsed)) return parsed.filter((value) => typeof value === "string" && value.trim().length > 20).length || (runtime.OPENAI_API_KEY ? 1 : 0);
+  } catch { /* Report the valid fallback key only. */ }
+  return runtime.OPENAI_API_KEY ? 1 : 0;
+}
 
 async function authorized(request: Request, runtime: Runtime) {
   const identity = await identityFromRequest(request);
@@ -54,7 +62,11 @@ export async function GET(request: Request) {
       pe.page, pe.tutorial_step AS tutorialStep, pe.user_prompt AS userPrompt
       FROM assistant_feedback_events afe JOIN prompt_events pe ON pe.id=afe.prompt_event_id
       ORDER BY afe.created_at DESC LIMIT 100`).all(),
-    runtime.DB.prepare("SELECT assistant_enabled AS assistantEnabled, default_team_token_quota AS defaultTeamTokenQuota FROM organizer_settings WHERE id='global'").first(),
+    runtime.DB.prepare(`SELECT assistant_enabled AS assistantEnabled,event_token_quota AS eventTokenQuota,
+      default_team_token_quota AS defaultTeamTokenQuota,default_participant_token_quota AS defaultParticipantTokenQuota,
+      per_minute_request_limit AS perMinuteRequestLimit,per_hour_request_limit AS perHourRequestLimit,
+      max_concurrent_requests AS maxConcurrentRequests,max_output_tokens AS maxOutputTokens
+      FROM organizer_settings WHERE id='global'`).first(),
     runtime.DB.prepare("SELECT status, COUNT(*) AS count FROM cognee_sync_outbox GROUP BY status").all(),
     runtime.DB.prepare("SELECT entry_kind AS entryKind, COUNT(*) AS count FROM participant_model_entries GROUP BY entry_kind").all(),
     runtime.DB.prepare(`SELECT id, page, tutorial_step AS tutorialStep, prompt_count AS promptCount,
@@ -105,9 +117,14 @@ export async function GET(request: Request) {
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
   const safeFeedbacks = feedbacks.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) }));
+  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "team_memberships", "team_invites"];
+  const schemaTables = await runtime.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<{ name: string }>();
+  const presentTables = new Set(schemaTables.results.map((row) => row.name));
+  const missingTables = requiredTables.filter((name) => !presentTables.has(name));
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
-    prompts: safeRecent, settings: settings || { assistantEnabled: 1, defaultTeamTokenQuota: 100000 },
+    prompts: safeRecent, settings: { ...(settings || { assistantEnabled: 1, eventTokenQuota: 5000000, defaultTeamTokenQuota: 100000, defaultParticipantTokenQuota: 25000, perMinuteRequestLimit: 10, perHourRequestLimit: 100, maxConcurrentRequests: 2, maxOutputTokens: 1500 }), providerKeyCount: configuredProviderKeyCount(runtime), keyRouting: "stable_team_shard" },
     feedbacks: safeFeedbacks,
+    preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), expectedParticipantScale: "50–70" },
     clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results, purges: clawmaxPurges.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
@@ -122,7 +139,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { action?: string; signalId?: string; decision?: "approved" | "rejected" | "reviewing"; editedSummary?: string; suggestedAction?: string; assistantEnabled?: boolean; defaultTeamTokenQuota?: number };
+  const input = await request.json() as { action?: string; signalId?: string; decision?: "approved" | "rejected" | "reviewing"; editedSummary?: string; suggestedAction?: string; assistantEnabled?: boolean; eventTokenQuota?: number; defaultTeamTokenQuota?: number; defaultParticipantTokenQuota?: number; perMinuteRequestLimit?: number; perHourRequestLimit?: number; maxConcurrentRequests?: number; maxOutputTokens?: number };
   if (input.action === "review_signal") {
     if (!input.signalId || !input.decision) return Response.json({ error: "Signal and review decision are required." }, { status: 400 });
     const result = await runtime.DB.prepare(`UPDATE learning_signals SET review_status=?,cognee_summary=COALESCE(?,cognee_summary),suggested_action=COALESCE(?,suggested_action),reviewed_at=? WHERE id=?`)
@@ -131,11 +148,22 @@ export async function PATCH(request: Request) {
     return Response.json({ saved: true, signalId: input.signalId, reviewStatus: input.decision });
   }
   const enabled = input.assistantEnabled === false ? 0 : 1;
-  const quota = Math.max(1000, Math.min(10000000, Number(input.defaultTeamTokenQuota) || 100000));
-  await runtime.DB.prepare(`INSERT INTO organizer_settings (id, assistant_enabled, default_team_token_quota, updated_at)
-    VALUES ('global', ?, ?, ?) ON CONFLICT(id) DO UPDATE SET assistant_enabled=excluded.assistant_enabled,
-    default_team_token_quota=excluded.default_team_token_quota, updated_at=excluded.updated_at`).bind(enabled, quota, Date.now()).run();
-  return Response.json({ assistantEnabled: enabled, defaultTeamTokenQuota: quota });
+  const eventQuota = Math.max(1000, Math.min(1000000000, Number(input.eventTokenQuota) || 5000000));
+  const quota = Math.max(1000, Math.min(eventQuota, 10000000, Number(input.defaultTeamTokenQuota) || 100000));
+  const participantQuota = Math.max(500, Math.min(quota, Number(input.defaultParticipantTokenQuota) || 25000));
+  const perMinute = Math.max(1, Math.min(60, Number(input.perMinuteRequestLimit) || 10));
+  const perHour = Math.max(perMinute, Math.min(1000, Number(input.perHourRequestLimit) || 100));
+  const concurrent = Math.max(1, Math.min(5, Number(input.maxConcurrentRequests) || 2));
+  const maxOutput = Math.max(128, Math.min(4000, Number(input.maxOutputTokens) || 1500));
+  await runtime.DB.prepare(`INSERT INTO organizer_settings
+    (id,assistant_enabled,event_token_quota,default_team_token_quota,default_participant_token_quota,per_minute_request_limit,per_hour_request_limit,max_concurrent_requests,max_output_tokens,updated_at)
+    VALUES ('global',?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET assistant_enabled=excluded.assistant_enabled,
+    event_token_quota=excluded.event_token_quota,default_team_token_quota=excluded.default_team_token_quota,
+    default_participant_token_quota=excluded.default_participant_token_quota,per_minute_request_limit=excluded.per_minute_request_limit,
+    per_hour_request_limit=excluded.per_hour_request_limit,max_concurrent_requests=excluded.max_concurrent_requests,
+    max_output_tokens=excluded.max_output_tokens,updated_at=excluded.updated_at`)
+    .bind(enabled,eventQuota,quota,participantQuota,perMinute,perHour,concurrent,maxOutput,Date.now()).run();
+  return Response.json({ assistantEnabled: enabled,eventTokenQuota:eventQuota,defaultTeamTokenQuota:quota,defaultParticipantTokenQuota:participantQuota,perMinuteRequestLimit:perMinute,perHourRequestLimit:perHour,maxConcurrentRequests:concurrent,maxOutputTokens:maxOutput });
 }
 
 export async function DELETE(request: Request) {

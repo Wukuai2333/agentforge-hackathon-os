@@ -6,7 +6,10 @@ import { CompanyBrainTutorial } from "./company-brain-tutorial";
 type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
 type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
-type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null };
+type ResponseLength = "brief" | "balanced" | "detailed";
+type InteractionMode = "guide" | "collaborate" | "direct";
+type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null; onboardingCompleted?: number | boolean; responseLength?: ResponseLength | null; interactionMode?: InteractionMode | null };
+type SelectionAction = { text: string; left: number; top: number } | null;
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
@@ -53,7 +56,21 @@ const demoPrivacySections = [
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
 
-type AuthConfig = { enabled: boolean; mode: "agentforge"; googleEnabled: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
+const interviewerQuestions: Array<{ id: string; prompt: string; helper: string; placeholder: string; required: boolean; example?: string; choices?: string[] }> = [
+  { id: "introduction", prompt: "First, tell me a little about yourself.", helper: "Optional · Share only what feels useful for supporting you during this hackathon.", placeholder: "What do you do, and what brought you here?", required: false, example: "Example: I am a product-design student exploring agents for research workflows." },
+  { id: "background", prompt: "Which background best describes you right now?", helper: "Required · This helps us understand who the tutorial is serving—not evaluate you.", placeholder: "Choose one or describe your background…", required: true, choices: ["NYU Tandon student", "Student at another school", "Tech professional", "Educator or researcher", "Another background"] },
+  { id: "stage", prompt: "What stage are you currently at?", helper: "Required · Use an education year, degree stage, or career stage—whichever fits you.", placeholder: "For example: undergraduate junior, master's student, early-career engineer…", required: true, choices: ["Undergraduate", "Master's student", "Doctoral student", "Early-career professional", "Experienced professional"] },
+  { id: "field", prompt: "What is your major or primary field?", helper: "Required · Interdisciplinary answers are welcome.", placeholder: "Your major or primary field…", required: true, example: "Example: Computer Science + Integrated Design & Media." },
+  { id: "ai_experience", prompt: "How have you used AI tools before?", helper: "Optional · Think about learning, coding, research, work, or creative projects.", placeholder: "Tell us what you use and how often…", required: false, choices: ["I am new to AI tools", "I use them occasionally", "I use them most weeks", "I use them daily"] },
+  { id: "agent_experience", prompt: "How much experience do you have building agents or automations?", helper: "Optional · There is no preferred answer; this helps us calibrate support.", placeholder: "Describe anything you have tried…", required: false, choices: ["This is my first time", "I have tried one tutorial", "I have built a few", "I build them regularly"] },
+  { id: "learning_goal", prompt: "What do you most want to learn or get better at here?", helper: "Required · A concrete learning goal helps us study whether the experience actually supported it.", placeholder: "What capability do you want to leave with?", required: true, example: "Example: I want to learn how to test whether an agent uses memory reliably." },
+];
+
+function InteractionPreferencePicker({ responseLength, interactionMode, onLength, onMode, compact = false }: { responseLength: ResponseLength; interactionMode: InteractionMode; onLength: (value: ResponseLength) => void; onMode: (value: InteractionMode) => void; compact?: boolean }) {
+  return <div className={`interaction-preferences ${compact ? "compact" : ""}`}><fieldset><legend>ANSWER LENGTH</legend><div>{([['brief','Brief'],['balanced','Balanced'],['detailed','Detailed']] as Array<[ResponseLength,string]>).map(([value,label]) => <button type="button" key={value} className={responseLength === value ? "selected" : ""} aria-pressed={responseLength === value} onClick={() => onLength(value)}>{label}</button>)}</div></fieldset><fieldset><legend>HOW SHOULD AI HELP?</legend><div>{([['guide','Guide me'],['collaborate','Work with me'],['direct','Be direct']] as Array<[InteractionMode,string]>).map(([value,label]) => <button type="button" key={value} className={interactionMode === value ? "selected" : ""} aria-pressed={interactionMode === value} onClick={() => onMode(value)}>{label}</button>)}</div></fieldset></div>;
+}
+
+type AuthConfig = { enabled: boolean; mode: "agentforge"; googleEnabled: boolean; emailDeliveryConfigured?: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
 
 async function endSession() {
   try { await fetch("/api/auth/session", { method: "DELETE" }); } finally {
@@ -125,7 +142,7 @@ function AuthPanel({ eventName }: { eventName: string }) {
 
 function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
-  const [mode, setMode] = useState<"signup" | "signin" | "forgot">("signup");
+  const [mode, setMode] = useState<"signup" | "signin" | "forgot" | "verify" | "reset">("signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -133,18 +150,26 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [actionToken, setActionToken] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/auth/config").then(async (response) => {
-      const next = await response.json() as AuthConfig;
-      if (!cancelled) { setConfig(next); if (!next.registrationOpen) setMode("signin"); }
-    }).catch(() => { if (!cancelled) setError("Authentication could not be prepared."); });
-    return () => { cancelled = true; };
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const authAction = params.get("auth"), token = params.get("token") || "";
+      if (token && authAction === "verify") { setActionToken(token); setMode("verify"); }
+      if (token && authAction === "reset") { setActionToken(token); setMode("reset"); }
+      void fetch("/api/auth/config").then(async (response) => {
+        const next = await response.json() as AuthConfig;
+        if (!cancelled) { setConfig(next); if (!next.registrationOpen && !token) setMode("signin"); }
+      }).catch(() => { if (!cancelled) setError("Authentication could not be prepared."); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, []);
 
   async function submit(action: "signup" | "signin") {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setMessage("");
     try {
       if (!email.trim()) throw new Error("Enter your email address.");
       if (password.length < 12) throw new Error("Use a password with at least 12 characters.");
@@ -155,10 +180,16 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
         body: JSON.stringify({ action, email: email.trim(), password, displayName: name.trim() }),
       });
       const raw = await response.text();
-      let result: { error?: string } = {};
+      let result: { error?: string; verificationRequired?: boolean; email?: string; message?: string } = {};
       if (raw) {
         try { result = JSON.parse(raw) as { error?: string }; }
         catch { throw new Error(response.ok ? "The server returned an unreadable response." : "The authentication service returned an error. Please try again."); }
+      }
+      if (result.verificationRequired) {
+        if (result.email) setEmail(result.email);
+        setMode("verify");
+        setMessage(result.message || result.error || "Check your email to verify your account.");
+        return;
       }
       if (!response.ok) throw new Error(result.error || "Authentication failed.");
       const returnTo = window.localStorage.getItem("agentforge_auth_return_to") || "#/home";
@@ -169,28 +200,54 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
     finally { setBusy(false); }
   }
 
+  async function emailAction(action: "request_verification" | "forgot" | "verify" | "reset") {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      if ((action === "request_verification" || action === "forgot") && !email.trim()) throw new Error("Enter your email address.");
+      if (action === "reset") {
+        if (password.length < 12) throw new Error("Use a password with at least 12 characters.");
+        if (password !== confirmPassword) throw new Error("The passwords do not match.");
+      }
+      const response = await fetch("/api/auth/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, email: email.trim(), token: actionToken, password }) });
+      const result = await response.json() as { error?: string; message?: string; verified?: boolean; reset?: boolean };
+      if (!response.ok) throw new Error(result.error || "The email action could not be completed.");
+      if (result.verified) {
+        window.history.replaceState(null, "", window.location.pathname);
+        window.location.reload();
+        return;
+      }
+      if (result.reset) { setMode("signin"); setPassword(""); setConfirmPassword(""); }
+      setMessage(result.message || (action === "request_verification" ? "Verification email sent." : "If this email is registered, a reset link has been sent."));
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "The email action could not be completed."); }
+    finally { setBusy(false); }
+  }
+
   return <div className="entry-shell">
     <section className="entry-brand-panel">
       <span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span>
       <h1>Build an agent that learns with you.</h1>
       <p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p>
-      <div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Consent</span><i>→</i><span><b>3</b>Team</span><i>→</i><span><b>4</b>Build</span></div>
+      <div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div>
       <small>AgentForge stores a salted password hash, never the original password. Sessions use secure, HttpOnly cookies.</small>
     </section>
     <section className="auth-card supabase-auth">
       <span className="eyebrow">SECURE EVENT ACCOUNT</span>
-      <h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : "Account recovery"}</h2>
+      <h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : mode === "verify" ? "Verify your email" : "Choose a new password"}</h2>
       {!config ? <p>Preparing secure sign-in…</p> : <>
         {!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}
-        {mode !== "forgot" && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); }}>Sign in</button></div>}
+        {(mode === "signup" || mode === "signin") && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}
         {mode === "signup" && <label htmlFor="agentforge-display-name">DISPLAY NAME<input id="agentforge-display-name" name="name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}
-        {mode !== "forgot" && <><label htmlFor="agentforge-email">EMAIL<input id="agentforge-email" name="email" type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label htmlFor="agentforge-password">PASSWORD<span className="password-input-wrap"><input id="agentforge-password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} title={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((visible) => !visible)}><span className={`password-eye${showPassword ? " is-visible" : ""}`} aria-hidden="true" /></button></span></label></>}
-        {mode === "signup" && <label htmlFor="agentforge-confirm-password">CONFIRM PASSWORD<span className="password-input-wrap"><input id="agentforge-confirm-password" name="password-confirmation" type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /><button type="button" className="password-visibility" aria-label={showPassword ? "Hide passwords" : "Show passwords"} aria-pressed={showPassword} title={showPassword ? "Hide passwords" : "Show passwords"} onClick={() => setShowPassword((visible) => !visible)}><span className={`password-eye${showPassword ? " is-visible" : ""}`} aria-hidden="true" /></button></span></label>}
+        {(mode === "signup" || mode === "signin" || mode === "forgot" || (mode === "verify" && !actionToken)) && <label htmlFor="agentforge-email">EMAIL<input id="agentforge-email" name="email" type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>}
+        {(mode === "signup" || mode === "signin" || mode === "reset") && <label htmlFor="agentforge-password">{mode === "reset" ? "NEW PASSWORD" : "PASSWORD"}<span className="password-input-wrap"><input id="agentforge-password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} title={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((visible) => !visible)}><span className={`password-eye${showPassword ? " is-visible" : ""}`} aria-hidden="true" /></button></span></label>}
+        {(mode === "signup" || mode === "reset") && <label htmlFor="agentforge-confirm-password">CONFIRM PASSWORD<span className="password-input-wrap"><input id="agentforge-confirm-password" name="password-confirmation" type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></span></label>}
         {error && <p className="entry-error">{error}</p>}
+        {message && <p className="auth-success">{message}</p>}
         {mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void submit("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}
         {mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void submit("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}
-        {mode === "forgot" && <><p>Automated email recovery is the next identity step. For this pilot, contact an Organizer to reset access.</p><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
-        {mode !== "forgot" && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled><b>G</b>Google OAuth is the next phase</button></>}
+        {mode === "forgot" && <><p>Enter your email. For privacy, the confirmation looks the same whether or not an account exists.</p><button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
+        {mode === "verify" && <><p>{actionToken ? "This one-time link will verify your email and sign you in." : "Check your inbox, or request a fresh one-time verification link."}</p>{actionToken ? <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("verify")}>{busy ? "Verifying…" : "Verify email →"}</button> : <button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("request_verification")}>{busy ? "Sending…" : "Resend verification email"}</button>}<button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
+        {mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("reset")}>{busy ? "Updating…" : "Update password →"}</button>}
+        {(mode === "signup" || mode === "signin") && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled><b>G</b>Google OAuth is the next phase</button></>}
         <p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p>
       </>}
     </section>
@@ -249,7 +306,7 @@ function LegacyEntryFlow({ eventName, onComplete }: { eventName: string; onCompl
 }
 
 function EntryFlow({ eventName, account, onComplete }: { eventName: string; account: PortalUser | null; onComplete: (user: PortalUser) => void }) {
-  const [stage, setStage] = useState<"auth" | "consent" | "team" | "survey">(account ? "consent" : "auth");
+  const [stage, setStage] = useState<"auth" | "consent" | "team" | "survey">(!account ? "auth" : account.consentVersion === "pending" ? "consent" : account.teamId ? "survey" : "team");
   const [current, setCurrent] = useState(account);
   const [consentChecks, setConsentChecks] = useState([false, false, false]);
   const [teamMode, setTeamMode] = useState<"create" | "join">("create");
@@ -257,17 +314,34 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
   const [answers, setAnswers] = useState<string[]>([]);
+  const [responseLength, setResponseLength] = useState<ResponseLength>(account?.responseLength || "brief");
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>(account?.interactionMode || "guide");
+  const [pointer, setPointer] = useState({ x: 50, y: 45 });
+  const interviewInput = useRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const questions = [
-    "What recurring problem would you most like your agent to solve?",
-    "How do you handle it today, and where does that workflow break?",
-    "What data may the agent use—and what must remain off limits?",
-    "What observable result would prove the agent is useful?",
-    "What should it remember between sessions?",
-    "How should feedback change its next attempt?",
-    "Does it need another agent, tool, or shared team memory?",
-  ];
+  const [draftStatus, setDraftStatus] = useState<"loading" | "idle" | "saving" | "saved" | "error">("loading");
+
+  useEffect(() => { if (stage === "survey" && surveyStep < interviewerQuestions.length) interviewInput.current?.focus(); }, [stage, surveyStep]);
+  useEffect(() => {
+    if (stage !== "survey" || !current) return;
+    let cancelled = false;
+    void fetch("/api/onboarding", { cache: "no-store" }).then(async (response) => {
+      const result = await response.json() as { draft?: { answers?: Array<{ value?: string }>; currentStep?: number; responseLength?: ResponseLength; interactionMode?: InteractionMode } | null };
+      if (cancelled) return;
+      if (response.ok && result.draft) {
+        const step = Math.max(0, Math.min(interviewerQuestions.length, Number(result.draft.currentStep || 0)));
+        const restoredAnswers = result.draft.answers || [];
+        setAnswers(restoredAnswers.slice(0, step).map((item) => item.value || ""));
+        setAnswer(restoredAnswers[step]?.value || "");
+        setSurveyStep(step);
+        setResponseLength(result.draft.responseLength || "brief");
+        setInteractionMode(result.draft.interactionMode || "guide");
+      }
+      setDraftStatus("idle");
+    }).catch(() => { if (!cancelled) setDraftStatus("error"); });
+    return () => { cancelled = true; };
+  }, [stage, current?.participantId]);
 
   async function accountAction(action: string, extra: Record<string, unknown> = {}) {
     setSaving(true); setError("");
@@ -281,21 +355,45 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
     finally { setSaving(false); }
   }
 
-  function continueSurvey() {
-    if (!answer.trim()) return;
-    setAnswers((items) => [...items, answer.trim()]);
+  async function saveDraft(nextAnswers: string[], nextStep: number) {
+    setDraftStatus("saving");
+    try {
+      const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ draft: true, currentStep: nextStep, answers: interviewerQuestions.map((item, index) => ({ id: item.id, value: nextAnswers[index] || "" })), responseLength, interactionMode }) });
+      if (!response.ok) throw new Error();
+      setDraftStatus("saved");
+    } catch { setDraftStatus("error"); }
+  }
+
+  async function continueSurvey() {
+    const question = interviewerQuestions[surveyStep];
+    if (question?.required && !answer.trim()) return;
+    const nextAnswers = [...answers, answer.trim()];
+    setAnswers(nextAnswers);
     setAnswer("");
-    setSurveyStep((value) => value + 1);
+    const nextStep = surveyStep + 1;
+    setSurveyStep(nextStep);
+    await saveDraft(nextAnswers, nextStep);
+  }
+
+  function previousSurvey() {
+    if (surveyStep < 1) return;
+    const previous = answers[answers.length - 1] || "";
+    setAnswers((items) => items.slice(0, -1));
+    setSurveyStep((value) => value - 1);
+    setAnswer(previous);
+    setDraftStatus("idle");
   }
 
   if (stage === "auth") return <AgentForgeAuthPanel eventName={eventName} />;
 
   if (stage === "consent" && current) return <div className="consent-page"><header><div><span className="brand-mark">A</span><span><strong>AgentForge</strong><small>{eventName}</small></span></div><span>PRIVACY CONSENT</span></header><main><section className="policy-document"><span className="demo-policy-badge">DEMO POLICY · REPLACE AFTER REVIEW</span><h1>Before your agent remembers anything.</h1><p className="policy-lead">This policy demonstrates the consent flow and still requires organizer and legal review.</p>{demoPrivacySections.map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section><aside className="consent-card"><span className="eyebrow">YOUR CHOICES</span><h2>Review and confirm</h2><p>The policy version, exact choices, participant registration, and timestamp are stored together.</p>{["I understand which prompts, responses, and activity may be recorded.", "I understand that selected event data may be stored in Cognee for memory and learning analysis.", "I will not enter credentials or sensitive personal information."].map((item, index) => <label key={item}><input type="checkbox" checked={consentChecks[index]} onChange={() => setConsentChecks((items) => items.map((value, itemIndex) => itemIndex === index ? !value : value))} /><span>{item}</span></label>)}{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving || !consentChecks.every(Boolean)} onClick={async () => { const next = await accountAction("accept_consent", { choices: consentChecks }); if (next) setStage("team"); }}>{saving ? "Saving consent…" : "Agree & choose a team →"}</button><button className="consent-signout" onClick={() => void endSession()}>I do not agree · sign out</button><small>Demo consent version: AF-DEMO-2026-07</small></aside></main></div>;
 
-  if (stage === "team" && current) return <div className="entry-survey team-entry"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>TEAM SETUP</small></span></div><span>ONE ACTIVE TEAM PER PERSON</span></header><main><section><span className="eyebrow">TEAM MEMBERSHIP</span><h1>Build with a team—or start solo.</h1><p>Create a team and share its invite code, or join an existing team. You can switch later; earlier membership records and event data remain available through the event.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create team</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join team</button></div><label>{teamMode === "create" ? "TEAM NAME" : "INVITE CODE"}<input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Example: Team Synapse" : "8-character code"} /></label>{error && <p className="entry-error">{error}</p>}<div className="entry-survey-actions"><button className="text-button" onClick={() => setStage("survey")}>Continue solo for now</button><button className="primary" disabled={saving || !teamValue.trim()} onClick={async () => { const next = await accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue }); if (next) setStage("survey"); }}>{saving ? "Saving…" : teamMode === "create" ? "Create team →" : "Join team →"}</button></div></section><aside><span>YOUR EVENT IDENTITY</span><div className="filled"><b>✓</b><span>{current.displayName}<small>{current.email}</small></span></div><div className="filled"><b>✓</b><span>Consent recorded<small>{current.consentVersion}</small></span></div><div><b>3</b><span>Team membership<small>Waiting for your choice</small></span></div></aside></main></div>;
+  if (stage === "team" && current) return <div className="entry-survey team-entry"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>TEAM SETUP</small></span></div><span>ONE ACTIVE TEAM PER PERSON</span></header><main><section><span className="eyebrow">TEAM MEMBERSHIP</span><h1>Build with a team—or start solo.</h1><p>Create a team and share its invite code, join an existing team, or create a private Personal Workspace. Team changes later are handled by an Organizer so earlier Shared Space access stays auditable.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create team</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join team</button></div><label>{teamMode === "create" ? "TEAM NAME" : "INVITE CODE"}<input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Example: Team Synapse" : "8-character code"} /></label>{error && <p className="entry-error">{error}</p>}<div className="entry-survey-actions"><button className="text-button" disabled={saving} onClick={async () => { const next = await accountAction("continue_solo"); if (next) setStage("survey"); }}>{saving ? "Creating workspace…" : "Continue with a Personal Workspace"}</button><button className="primary" disabled={saving || !teamValue.trim()} onClick={async () => { const next = await accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue }); if (next) setStage("survey"); }}>{saving ? "Saving…" : teamMode === "create" ? "Create team →" : "Join team →"}</button></div></section><aside><span>YOUR EVENT IDENTITY</span><div className="filled"><b>✓</b><span>{current.displayName}<small>{current.email}</small></span></div><div className="filled"><b>✓</b><span>Consent recorded<small>{current.consentVersion}</small></span></div><div><b>3</b><span>Team membership<small>Waiting for your choice</small></span></div></aside></main></div>;
 
-  const complete = surveyStep >= questions.length;
-  return <div className="entry-survey"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>DYNAMIC PROJECT DISCOVERY</small></span></div><span>PROJECT SURVEY</span></header><main><section><span className="eyebrow">AGENT-GUIDED ONBOARDING · DEMO</span><h1>{complete ? "Your starting direction is ready." : questions[surveyStep]}</h1>{complete ? <><p>These responses become your project record and participant-model evidence. ClawMax will eventually choose the follow-up questions dynamically.</p><div className="survey-summary">{answers.map((item, index) => <article key={`${index}-${item}`}><b>{String(index + 1).padStart(2, "0")}</b><p>{item}</p></article>)}</div>{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Project could not be saved."); if (current) onComplete(current); } catch (problem) { setError(problem instanceof Error ? problem.message : "Project could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving project…" : "Enter Participant Portal →"}</button></> : <><p>Answer with your real workflow in mind. The future ClawMax interviewer will follow up when an answer is unclear.</p><textarea rows={6} value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); continueSurvey(); } }} placeholder="Describe it in your own words…" /><div className="entry-survey-actions"><small>Question {surveyStep + 1} of {questions.length} · Press Enter to continue</small><button className="primary" disabled={!answer.trim()} onClick={continueSurvey}>Continue →</button></div></>}</section><aside><span>LIVE PROJECT BRIEF</span>{["Project idea", "Problem statement", "Data boundaries", "Success criteria", "Memory role", "Improvement loop", "Agent / Brain needs"].map((item, index) => <div className={index < answers.length ? "filled" : ""} key={item}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item}<small>{index < answers.length ? "Captured from your response" : "Waiting for context"}</small></span></div>)}</aside></main></div>;
+  const complete = surveyStep >= interviewerQuestions.length;
+  const question = interviewerQuestions[surveyStep];
+  const visualStyle = { "--interview-x": `${pointer.x}%`, "--interview-y": `${pointer.y}%`, "--typing-energy": Math.min(1, answer.length / 180) } as React.CSSProperties;
+  return <div className="entry-survey interviewer-entry" style={visualStyle} onMouseMove={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); setPointer({ x: ((event.clientX - bounds.left) / bounds.width) * 100, y: ((event.clientY - bounds.top) / bounds.height) * 100 }); }}><div className="interviewer-atmosphere" aria-hidden="true"><i /><i /><i /><i /></div><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>PARTICIPANT INTERVIEW</small></span></div><span>{complete ? "YOUR AI PREFERENCES" : `QUESTION ${surveyStep + 1} OF ${interviewerQuestions.length}`}</span></header><main><section className="interviewer-card"><div className="interviewer-presence"><span className="interviewer-orb">✦</span><span><strong>AgentForge Interviewer</strong><small>{complete ? "One last choice before we begin" : question.required ? "Listening · required question" : "Listening · optional question"}</small></span></div>{complete ? <><span className="eyebrow">YOU CONTROL THE INTERACTION</span><h1>How should Ask AI work with you?</h1><p>These preferences change how answers are presented. You can change them inside Ask AI at any time.</p><InteractionPreferencePicker responseLength={responseLength} interactionMode={interactionMode} onLength={setResponseLength} onMode={setInteractionMode} />{error && <p className="entry-error">{error}</p>}<div className="draft-state" data-state={draftStatus}>{draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft could not be saved" : "Your answers are saved as you continue"}</div><div className="entry-survey-actions"><button className="text-button" onClick={previousSurvey}>← Previous</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const payload = { answers: interviewerQuestions.map((item, index) => ({ id: item.id, value: answers[index] || "" })), responseLength, interactionMode }; const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Your interview could not be saved."); if (current) onComplete({ ...current, onboardingCompleted: true, responseLength, interactionMode }); } catch (problem) { setError(problem instanceof Error ? problem.message : "Your interview could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving your profile…" : "Enter Participant Portal →"}</button></div></> : <><span className="eyebrow">GETTING TO KNOW HOW YOU LEARN</span><h1>{question.prompt}</h1><p>{question.helper}</p>{question.example && <p className="interviewer-example">{question.example}</p>}{question.choices && <div className="interviewer-choices">{question.choices.map((choice) => <button type="button" key={choice} className={answer === choice ? "selected" : ""} onClick={() => { setAnswer(choice); interviewInput.current?.focus(); }}>{choice}</button>)}</div>}<textarea ref={interviewInput} autoFocus rows={4} value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void continueSurvey(); } }} placeholder={question.placeholder} /><div className="draft-state" data-state={draftStatus}>{draftStatus === "loading" ? "Checking for a saved draft…" : draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Saved" : draftStatus === "error" ? "Could not save—try Next again" : "Changes save when you continue"}</div><div className="entry-survey-actions"><button className="text-button" disabled={surveyStep === 0} onClick={previousSurvey}>← Previous</button><button className="text-button save-exit" onClick={async () => { const nextAnswers = [...answers]; nextAnswers[surveyStep] = answer.trim(); await saveDraft(nextAnswers, surveyStep); await endSession(); window.location.reload(); }}>Save & continue later</button>{!question.required && <button className="text-button" onClick={() => { setAnswer(""); void continueSurvey(); }}>Skip for now</button>}<small>Press Enter or choose Next</small><button className="primary" disabled={question.required && !answer.trim()} onClick={() => void continueSurvey()}>Next →</button></div></>}</section><aside className="interviewer-progress"><span>YOUR PROFILE · RAW SELF-REPORT</span><p>Your words remain separate from future AI inference.</p>{interviewerQuestions.map((item, index) => <div className={index < answers.length ? "filled" : index === surveyStep ? "active" : ""} key={item.id}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item.id.replaceAll("_", " ")}<small>{index < answers.length ? answers[index] ? answers[index].slice(0, 55) : "Skipped for now" : index === surveyStep ? item.required ? "Current · required" : "Current · optional" : item.required ? "Required" : "Optional"}</small></span></div>)}</aside></main></div>;
 }
 
 type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
@@ -326,6 +424,7 @@ export function HackathonPortal() {
   const [assistantWorking, setAssistantWorking] = useState(false);
   const [viewRestored, setViewRestored] = useState(false);
   const [assistantContext, setAssistantContext] = useState("");
+  const [selectionAction, setSelectionAction] = useState<SelectionAction>(null);
   const [assistantDraft, setAssistantDraft] = useState<{ text: string; nonce: number } | undefined>();
   const [surveyStep, setSurveyStep] = useState(0);
   const [answer, setAnswer] = useState("");
@@ -354,7 +453,7 @@ export function HackathonPortal() {
         const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bootstrap" }) });
         const result = await response.json() as { account?: PortalUser };
         if (!response.ok || !result.account || cancelled) return;
-        if (result.account.role === "organizer" || result.account.consentVersion !== "pending") setPortalUser(result.account);
+        if (result.account.role === "organizer" || (result.account.consentVersion !== "pending" && Boolean(result.account.onboardingCompleted))) setPortalUser(result.account);
         else setPendingAccount(result.account);
       } finally { if (!cancelled) setEntryReady(true); }
     };
@@ -418,6 +517,22 @@ export function HackathonPortal() {
     return () => window.removeEventListener("agentforge-assistant-working", updateWorking);
   }, []);
 
+  useEffect(() => {
+    const dismissSelectionAction = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest(".selection-ask-action")) setSelectionAction(null);
+    };
+    const dismissOnScroll = () => setSelectionAction(null);
+    const dismissOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setSelectionAction(null); };
+    document.addEventListener("mousedown", dismissSelectionAction);
+    document.addEventListener("keydown", dismissOnEscape);
+    window.addEventListener("scroll", dismissOnScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", dismissSelectionAction);
+      document.removeEventListener("keydown", dismissOnEscape);
+      window.removeEventListener("scroll", dismissOnScroll, true);
+    };
+  }, []);
+
   useEffect(() => { const refresh = async () => { try { const response = await fetch(`/api/event?updated=${Date.now()}`); const result = await response.json() as { config?: EventConfig; publishedAnnouncements?: PublishedAnnouncement[] }; if (response.ok) { setEventConfig(result.config || null); setPublishedAnnouncements(result.publishedAnnouncements || []); } } catch { /* current configuration remains visible during a temporary network failure */ } }; const timer = window.setTimeout(() => void refresh(), 0); const interval = window.setInterval(() => void refresh(), 30000); return () => { window.clearTimeout(timer); window.clearInterval(interval); }; }, []);
 
   const participantSurface = portalUser?.role !== "organizer" || organizerParticipantMode;
@@ -438,6 +553,37 @@ export function HackathonPortal() {
   }, [portalUser, participantSurface]);
 
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
+
+  function offerSelectedContext(target: EventTarget | null) {
+    if (view === "admin" || view === "eventAdmin") return;
+    if ((target as HTMLElement | null)?.closest("input, textarea, button, a, .assistant, .selection-ask-action")) return;
+    const selection = window.getSelection();
+    const selected = selection?.toString().trim() || "";
+    if (selected.length <= 2 || !selection?.rangeCount) {
+      setSelectionAction(null);
+      return;
+    }
+    const bounds = selection.getRangeAt(0).getBoundingClientRect();
+    if (!bounds.width && !bounds.height) return;
+    const safeHalfWidth = Math.min(126, Math.max(20, window.innerWidth / 2 - 12));
+    const left = Math.min(window.innerWidth - safeHalfWidth, Math.max(safeHalfWidth, bounds.left + bounds.width / 2));
+    const preferredTop = bounds.bottom + 12 < window.innerHeight - 54 ? bounds.bottom + 12 : bounds.top - 52;
+    const top = Math.min(window.innerHeight - 54, Math.max(12, preferredTop));
+    setSelectionAction({ text: selected.slice(0, 4000), left, top });
+  }
+
+  async function openClawMaxFromNavigation() {
+    try {
+      const response = await fetch("/api/clawmax/enrollments", { method: "POST" });
+      const result = await response.json() as { launchUrl?: string; error?: string };
+      if (!response.ok || !result.launchUrl) throw new Error(result.error || "ClawMax could not be opened.");
+      window.open(result.launchUrl, "_blank", "noopener,noreferrer");
+    } catch (problem) {
+      setAssistantContext(problem instanceof Error ? problem.message : "ClawMax could not be opened.");
+      setAssistantDraft({ text: "Help me connect to ClawMax and explain what I need to complete first.", nonce: Date.now() });
+      openAssistant();
+    }
+  }
 
   const title = useMemo(() => view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
 
@@ -497,12 +643,7 @@ export function HackathonPortal() {
   if (!portalUser) return <EntryFlow eventName={eventConfig?.eventName || "Personal Agent Hackathon"} account={pendingAccount} onComplete={enterPortal} />;
 
   return (
-    <div className="app-shell" onMouseUp={(event) => {
-      if (view === "admin" || view === "eventAdmin") return;
-      if ((event.target as HTMLElement).closest("input, textarea, button, a, .assistant")) return;
-      const selected = typeof window !== "undefined" ? window.getSelection()?.toString().trim() : "";
-      if (selected && selected.length > 2) { setAssistantContext(selected); openAssistant(); }
-    }}>
+    <div className="app-shell" onMouseUp={(event) => offerSelectedContext(event.target)} onTouchEnd={(event) => window.setTimeout(() => offerSelectedContext(event.target), 0)}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView(participantSurface ? "home" : "admin")} aria-label="AgentForge home">
           <span className="brand-mark">A</span>
@@ -523,6 +664,7 @@ export function HackathonPortal() {
           <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Space<span className="status-dot on" /></button>
           <button className={view === "model" ? "nav-item active" : "nav-item"} onClick={() => setView("model")}><Icon>⌬</Icon>Learning Model</button>
           <button className={view === "data" ? "nav-item active" : "nav-item"} onClick={() => setView("data")}><Icon>▦</Icon>My Data</button>
+          <button className="nav-item clawmax-nav-link" onClick={() => void openClawMaxFromNavigation()} title="Open the event ClawMax workspace in a new tab"><Icon>↗</Icon>Open ClawMax</button>
           {portalUser.role === "organizer" && <><p className="nav-label">DEMO CONTROLS</p><button className="nav-item perspective-switch return" onClick={returnToOrganizer}><Icon>←</Icon>Return to Organizer</button></>}
           </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
           <button className={view === "admin" ? "nav-item active" : "nav-item"} onClick={() => setView("admin")}><Icon>▥</Icon>Organizer View</button>
@@ -551,7 +693,7 @@ export function HackathonPortal() {
             <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
           )}
           {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
-          {view === "clawmaxTutorial" && <ClawMaxTutorial />}
+          {view === "clawmaxTutorial" && <ClawMaxTutorial onOpen={() => void openClawMaxFromNavigation()} />}
           {view === "cogneeTutorial" && <CogneeTutorial setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} />}
           {view === "companyBrainTutorial" && <CompanyBrainTutorial onBack={() => setView("learn")} onAsk={(text, context) => { setAssistantContext(context); setAssistantDraft({ text, nonce: Date.now() }); openAssistant(); }} />}
           {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
@@ -567,6 +709,7 @@ export function HackathonPortal() {
         </section>
       </main>
 
+      {selectionAction && participantSurface && <button type="button" className="selection-ask-action" style={{ left: selectionAction.left, top: selectionAction.top }} onMouseDown={(event) => event.preventDefault()} onClick={() => { setAssistantContext(selectionAction.text); setSelectionAction(null); openAssistant(); }}><span>✦</span> Ask Agent about this</button>}
       {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} draft={assistantDraft} /></div>}
       {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
       {announcementHistoryOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAnnouncementHistoryOpen(false)}><section className="participant-announcement-history" role="dialog" aria-modal="true" aria-labelledby="announcement-history-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">EVENT UPDATES</span><h2 id="announcement-history-title">Published announcements</h2></div><button type="button" onClick={() => setAnnouncementHistoryOpen(false)} aria-label="Close announcement history">×</button></header><div>{publishedAnnouncements.length ? publishedAnnouncements.map((item) => <article key={item.id}><small>{new Date(item.createdAt).toLocaleString()}</small><p>{item.announcementText}</p></article>) : <p className="notes-empty">No earlier published announcements yet.</p>}</div></section></div>}
@@ -662,6 +805,7 @@ function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers, 
 function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) => void; setView: (view: View) => void }) {
   return <>
     <div className="page-intro"><div><span className="eyebrow">YOUR HACKATHON LEARNING HUB</span><h2>Learn only what you need to build.</h2><p>Start with the tool you need now, then return to the build path below. Each tutorial is designed around something your team can demonstrate—not passive reading.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
+    <section className="fevi-participant-guide"><header><div><span className="eyebrow">HOW TO THINK WHILE BUILDING</span><h3>FEVI keeps you in control of the AI.</h3></div><p>This is a learning scaffold—not a grade or a measure of intelligence.</p></header><div>{[["F","Formulate","Define your goal, useful context, constraints, and what success looks like."],["E","Engage","Ask for the kind of help you need: a hint, explanation, critique, comparison, or plan."],["V","Verify","Check important claims, sources, logic, code, and assumptions before relying on them."],["I","Integrate","Choose what to accept, change, or reject—and explain the reason in your own words."]].map(([letter,title,text]) => <article key={letter}><b>{letter}</b><div><strong>{title}</strong><p>{text}</p></div></article>)}</div><footer><strong>A good result is not enough by itself.</strong><span>Keep evidence of what you checked and why you made the final decision.</span></footer></section>
     <section className="tutorial-library company-brain-library" aria-label="Tutorial library">
       <button className="tutorial-library-card clawmax" onClick={() => setView("clawmaxTutorial")}>
         <span className="library-mark">C</span><span className="library-status pending">WAITING FOR MAX</span>
@@ -693,8 +837,20 @@ function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) 
   </>;
 }
 
-function ClawMaxTutorial() {
-  return <div className="waiting-page"><div className="waiting-mark">C</div><span className="eyebrow">CLAWMAX TUTORIAL</span><h2>Waiting for Max.</h2><p>This page is reserved for the official ClawMax tutorial. Product steps, screenshots, terminology, and integration instructions will be added after Max provides or verifies the source materials.</p><div className="waiting-status"><span>CONTENT STATUS</span><b>Official materials pending</b></div><div className="waiting-proposal"><span>MEETING NOTE</span><p>Discuss adding a ClawMax Agentic Tutor Team that helps participants learn sponsor tools, answers questions with tutorial and project context, and escalates unresolved issues to human mentors.</p></div></div>;
+function ClawMaxTutorial({ onOpen }: { onOpen: () => void }) {
+  const steps = [
+    ["01", "Open BYOK", "Open ClawMax’s provider configuration before creating or running an agent."],
+    ["02", "Add your provider key", "Use the ClawMax BYOK setup. Never paste a key into AgentForge, a prompt, Shared Space, or a screenshot."],
+    ["03", "Select a default model", "Return to the workspace and choose the model your agent should use."],
+    ["04", "Test the provider connection", "Run the provider check. Continue only after ClawMax confirms that the model is reachable."],
+    ["05", "Start and test the agent", "Activate the agent, send one small test prompt, and confirm that a real response appears."],
+  ];
+  return <div className="clawmax-sdk-page">
+    <section className="clawmax-sdk-hero"><div><span className="eyebrow">CLAWMAX · TEMPORARY SDK TEST FLOW</span><h2>Connect a model before you build.</h2><p>This guide is for the locally running ClawMax 2.0 SDK environment used during integration testing. The Hackathon Cloud experience may provide model access differently, so participants should not assume they will need personal keys until that workflow is confirmed.</p></div><button className="primary" type="button" onClick={onOpen}>Open ClawMax SDK ↗</button></section>
+    <aside className="clawmax-sdk-notice"><strong>Before building</strong><span>ClawMax cannot run an agent until a provider and default model are available. Complete these five checks first.</span></aside>
+    <section className="byok-steps" aria-label="ClawMax BYOK setup steps">{steps.map(([number, title, description]) => <article key={number}><b>{number}</b><div><h3>{title}</h3><p>{description}</p></div></article>)}</section>
+    <section className="clawmax-sdk-checks"><div><span className="eyebrow">READY TO BUILD WHEN</span><h3>Your setup passes four visible checks.</h3><ul><li>A provider is configured</li><li>A default model is selected</li><li>The connection test succeeds</li><li>Your agent returns a real response</li></ul></div><div className="clawmax-cloud-note"><span>HACKATHON CLOUD</span><h3>This part is still being finalized.</h3><p>We still need to confirm whether ClawMax Cloud supplies event-managed model access, uses organizer-managed credentials, or asks participants to bring their own keys. This SDK instruction will be replaced once that workflow is agreed.</p></div></section>
+  </div>;
 }
 
 function CogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
@@ -987,7 +1143,8 @@ type OrganizerData = {
   pages: Array<{ page: string; tutorialStep?: string; prompts: number; errors: number; tokens: number }>;
   teams: Array<{ teamId: string; prompts: number; tokens: number }>;
   prompts: Array<{ id: string; participantId: string; teamId?: string; page: string; userPrompt: string; responseText?: string; modelName?: string; latencyMs?: number; inputTokens?: number; outputTokens?: number; status: string; errorCode?: string; createdAt: number }>;
-  settings: { assistantEnabled: number; defaultTeamTokenQuota: number };
+  settings: { assistantEnabled: number; eventTokenQuota: number; defaultTeamTokenQuota: number; defaultParticipantTokenQuota: number; perMinuteRequestLimit: number; perHourRequestLimit: number; maxConcurrentRequests: number; maxOutputTokens: number; providerKeyCount: number; keyRouting: string };
+  preflight: { databaseReady: boolean; missingTables: string[]; emailConfigured: boolean; appOriginConfigured: boolean; expectedParticipantScale: string };
   cognee: { connected: boolean; sync: Array<{ status: string; count: number }> };
   clawmax: {
     status: Array<{ status: string; count: number }>;
@@ -1003,12 +1160,29 @@ type OrganizerData = {
   promptEvaluations: Array<{ id: string; promptEventId: string; rubricVersion: string; evaluator: string; evaluationJson: string; totalScore?: number | null; createdAt: number; participantId: string; page: string; tutorialStep?: string; userPrompt: string; contextReference?: string; parentPromptEventId?: string; parentPrompt?: string; outcomeStatus?: string; outcomeEvidence?: string }>;
 };
 
-type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: "participant" | "organizer"; consentVersion: string; consentStatus: "accepted" | "withdrawn" | "pending"; joinedAt: number; lastActive: number; teamName?: string | null };
+type RegisteredParticipant = { id: string; displayName: string; email?: string | null; role: "participant" | "organizer"; consentVersion: string; consentStatus: "accepted" | "withdrawn" | "pending"; joinedAt: number; lastActive: number; teamId?: string | null; teamName?: string | null };
+type ManagedTeam = { id: string; name: string; workspaceKind: "team" | "personal"; activeMembers: number };
 type OrganizerGrant = { email: string; status: "active" | "revoked"; grantedByName: string; createdAt: number; updatedAt: number };
 type AnnouncementHistoryItem = { id: string; announcementText?: string | null; action: "published" | "updated" | "withdrawn"; active: number | boolean; editorName: string; createdAt: number };
 const toLocalInput = (value?: number | null) => value ? new Date(Number(value) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 type ProcessIndicatorView = { score?: number | null; status?: string; evidence: string[]; rationale?: string };
 type PromptEvaluationView = { scores: Record<string, number | null>; criterionEvidence: Record<string, string[]>; processIndicators: Record<string, ProcessIndicatorView>; totalScore?: number; maxScore?: number; grade?: string; coachingStatus?: string; strengths: string[]; weaknesses: string[]; improvedPrompt?: string; summary?: string; evidenceUsed: string[]; evidenceMissing: string[]; inferenceNotice?: string };
+
+function AIAllocationControls({ settings, totalTokens, onSave }: { settings: OrganizerData["settings"]; totalTokens: number; onSave: (settings: OrganizerData["settings"]) => Promise<void> }) {
+  const [draft, setDraft] = useState(settings);
+  const [saving, setSaving] = useState(false);
+  const numeric = (key: keyof OrganizerData["settings"], value: string) => setDraft((current) => ({ ...current, [key]: Number(value) }));
+  const fields: Array<[keyof OrganizerData["settings"], string, string, number, number]> = [
+    ["eventTokenQuota", "Event token budget", "Admission ceiling across every team and participant, based on recorded usage.", 1000, 1000000000],
+    ["defaultTeamTokenQuota", "Default team budget", "Shared ceiling for each team.", 1000, 10000000],
+    ["defaultParticipantTokenQuota", "Default participant budget", "Personal ceiling inside the team budget.", 500, 10000000],
+    ["maxOutputTokens", "Tokens per response", "Controls maximum answer length and worst-case cost.", 128, 4000],
+    ["perMinuteRequestLimit", "Requests per minute", "Absorbs bursts and accidental repeated clicks.", 1, 60],
+    ["perHourRequestLimit", "Requests per hour", "Sustained-use ceiling for each participant.", 1, 1000],
+    ["maxConcurrentRequests", "Concurrent requests", "How many Ask AI calls one participant may run at once.", 1, 5],
+  ];
+  return <section className="ai-allocation-panel"><header><div><span className="eyebrow">SERVER-MANAGED AI ACCESS</span><h3>Allocation & Usage Policy</h3><p>Participants never receive provider keys. AgentForge routes each team to a stable server-side key slot, then applies Event → Team → Participant limits before a model call.</p></div><div className={settings.providerKeyCount > 1 ? "key-pool-status ready" : "key-pool-status warning"}><small>PROVIDER KEY POOL</small><strong>{settings.providerKeyCount} active slot{settings.providerKeyCount === 1 ? "" : "s"}</strong><span>{settings.providerKeyCount > 1 ? "Teams are distributed across the pool." : settings.providerKeyCount === 1 ? "One fallback key is active. Add a server-side pool before the event." : "No provider key is configured."}</span></div></header><div className="allocation-flow"><span><b>1</b>Event ceiling</span><i>→</i><span><b>2</b>Team allocation</span><i>→</i><span><b>3</b>Member allocation</span><i>→</i><span><b>4</b>Request controls</span></div><div className="allocation-fields">{fields.map(([key,label,help,min,max]) => <label key={key}><span>{label}</span><input type="number" min={min} max={max} value={Number(draft[key])} onChange={(event) => numeric(key,event.target.value)} /><small>{help}</small></label>)}</div><footer><div><b>{totalTokens.toLocaleString()} tokens used</b><span>Keys are configured only as deployment secrets. This page stores allocation rules, never secret values.</span></div><button className="primary" disabled={saving} onClick={async () => { setSaving(true); await onSave(draft); setSaving(false); }}>{saving ? "Saving…" : "Save allocation policy"}</button></footer></section>;
+}
 
 function parsePromptEvaluation(raw: string): PromptEvaluationView {
   const empty: PromptEvaluationView = { scores: {}, criterionEvidence: {}, processIndicators: {}, strengths: [], weaknesses: [], evidenceUsed: [], evidenceMissing: [] };
@@ -1078,6 +1252,7 @@ function PromptEvaluationCard({ item }: { item: OrganizerData["promptEvaluations
 
 function EventManagement({ config, onSaved }: { config: EventConfig | null; onSaved: (config: EventConfig) => void }) {
   const [participants, setParticipants] = useState<RegisteredParticipant[]>([]);
+  const [teams, setTeams] = useState<ManagedTeam[]>([]);
   const [organizerGrants, setOrganizerGrants] = useState<OrganizerGrant[]>([]);
   const [serverOrganizerEmails, setServerOrganizerEmails] = useState<string[]>([]);
   const [currentOrganizerParticipantId, setCurrentOrganizerParticipantId] = useState("");
@@ -1094,9 +1269,9 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   async function open() {
     setError("");
     const response = await fetch("/api/event?admin=1");
-    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; organizerGrants?: OrganizerGrant[]; serverOrganizerEmails?: string[]; currentOrganizerParticipantId?: string; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
+    const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; teams?: ManagedTeam[]; organizerGrants?: OrganizerGrant[]; serverOrganizerEmails?: string[]; currentOrganizerParticipantId?: string; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
     if (!response.ok) { setError(response.status === 401 ? "Your account does not have Organizer access." : result.error || "Event management could not be loaded."); return; }
-    setParticipants(result.participants || []); setOrganizerGrants(result.organizerGrants || []); setServerOrganizerEmails(result.serverOrganizerEmails || []); setCurrentOrganizerParticipantId(result.currentOrganizerParticipantId || ""); setAnnouncementHistory(result.announcementHistory || []);
+    setParticipants(result.participants || []); setTeams(result.teams || []); setOrganizerGrants(result.organizerGrants || []); setServerOrganizerEmails(result.serverOrganizerEmails || []); setCurrentOrganizerParticipantId(result.currentOrganizerParticipantId || ""); setAnnouncementHistory(result.announcementHistory || []);
     if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
   }
 
@@ -1125,6 +1300,22 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
       setParticipants((items) => items.map((item) => item.id === participant.id ? { ...item, role } : item));
       setOrganizerNotice(role === "organizer" ? `${participant.displayName} now has Organizer access.` : `${participant.displayName} is now a Participant.`);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "The user role could not be changed."); }
+    finally { setSaving(false); }
+  }
+
+  async function moveParticipant(participant: RegisteredParticipant, destination: string) {
+    if (!destination || destination === participant.teamId) return;
+    const destinationName = destination === "personal" ? "a new Personal Workspace" : teams.find((team) => team.id === destination)?.name || "the selected team";
+    if (!window.confirm(`Move ${participant.displayName} to ${destinationName}? Earlier records stay linked to the previous team, and previous Shared Space access ends.`)) return;
+    const reason = window.prompt("Reason for this team change (saved in the membership audit trail):", "Organizer-managed correction") || "Organizer-managed correction";
+    setSaving(true); setError(""); setOrganizerNotice("");
+    try {
+      const response = await fetch("/api/event", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "move_team", participantId: participant.id, targetTeamId: destination === "personal" ? undefined : destination, createPersonal: destination === "personal", reason }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "The participant could not be moved.");
+      setOrganizerNotice(`${participant.displayName} was moved to ${destinationName}. Earlier team records were preserved.`);
+      await open();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "The participant could not be moved."); }
     finally { setSaving(false); }
   }
 
@@ -1180,7 +1371,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
       <div className="organizer-management-grid"><div className="organizer-roster"><h4>Current Organizers</h4>{activeOrganizers.length ? activeOrganizers.map((participant) => { const email = participant.email?.toLowerCase() || ""; const protectedOrganizer = serverOrganizerEmails.includes(email); return <article key={participant.id}><span className="organizer-avatar">{participant.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{participant.displayName}{participant.id === currentOrganizerParticipantId ? " · You" : ""}</strong><small>{participant.email || "Email unavailable"}</small><em>{participant.teamName || "No participant team"} · joined {new Date(participant.joinedAt).toLocaleDateString()}</em></div><span className={`access-source ${protectedOrganizer ? "protected" : "managed"}`}>{protectedOrganizer ? "SERVER PROTECTED" : "MANAGED HERE"}</span><button className="outline-button danger" disabled={saving || protectedOrganizer || activeOrganizers.length <= 1} title={protectedOrganizer ? "This email is protected by the server allowlist." : activeOrganizers.length <= 1 ? "At least one Organizer must remain." : "Remove Organizer access"} onClick={() => void revokeOrganizer(email)}>Remove access</button></article>; }) : <p className="notes-empty">No Organizer accounts are registered yet.</p>}{pendingGrantEmails.length > 0 && <div className="pending-organizers"><span>PENDING FIRST SIGN-IN</span>{pendingGrantEmails.map((email) => { const protectedOrganizer = serverOrganizerEmails.includes(email.toLowerCase()); return <div key={email}><span><strong>{email}</strong><small>{protectedOrganizer ? "Server-approved email" : `Added by ${organizerGrants.find((grant) => grant.email === email)?.grantedByName || "Organizer"}`}</small></span>{protectedOrganizer ? <b>PROTECTED</b> : <button disabled={saving} onClick={() => void revokeOrganizer(email)}>Revoke</button>}</div>; })}</div>}</div>
         <aside className="organizer-controls"><div><span className="eyebrow">ADD BY EMAIL</span><h4>Authorize an Organizer</h4><p>If the account already exists, access changes immediately. Otherwise the email is safely held until first sign-in.</p><label>ORGANIZER EMAIL<input type="email" placeholder="organizer@example.com" value={organizerEmail} onChange={(event) => setOrganizerEmail(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && organizerEmail.trim()) void grantOrganizer(); }} /></label><button className="primary" disabled={saving || !organizerEmail.trim()} onClick={() => void grantOrganizer()}>{saving ? "Saving…" : "Add Organizer"}</button></div><div className="promote-participant"><span className="eyebrow">REGISTERED USERS</span><h4>Promote a Participant</h4><input type="search" placeholder="Search name, email, or team…" value={organizerSearch} onChange={(event) => setOrganizerSearch(event.target.value)} />{organizerCandidates.length ? organizerCandidates.map((participant) => <button key={participant.id} disabled={saving} onClick={() => void updateRole(participant, "organizer")}><span><strong>{participant.displayName}</strong><small>{participant.email || participant.teamName || "Registered Participant"}</small></span><b>Make Organizer</b></button>) : <p className="notes-empty">No matching Participants.</p>}</div></aside></div>
     </section>
-    <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} authenticated event accounts · roles are enforced by the server</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{error && <p className="form-error directory-error">{error}</p>}<div className="participant-table user-management-table"><div className="participant-row heading"><span>USER</span><span>ROLE</span><span>TEAM</span><span>CONSENT</span><span>JOINED</span><span>LAST ACTIVE</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><span className="participant-identity"><strong>{participant.displayName}</strong><small>{participant.email || "Not collected"}</small></span><select aria-label={`Role for ${participant.displayName}`} value={participant.role} disabled={saving} onChange={(event) => void updateRole(participant, event.target.value as RegisteredParticipant["role"])}><option value="participant">Participant</option><option value="organizer">Organizer</option></select><span>{participant.teamName || "Unassigned"}</span><span><b className={`pill ${participant.consentStatus === "accepted" ? "on-track" : "needs-help"}`}>{participant.consentStatus}</b><small className="consent-version">{participant.consentVersion}</small></span><span>{new Date(participant.joinedAt).toLocaleString()}</span><span>{new Date(participant.lastActive).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
+    <section className="participant-directory"><div className="table-title"><div><h3>Registered Users</h3><p>{participants.length} authenticated event accounts · role and active Team are enforced by the server</p></div><input type="search" placeholder="Search name, email, role, team…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>{error && <p className="form-error directory-error">{error}</p>}<div className="participant-table user-management-table"><div className="participant-row heading"><span>USER</span><span>ROLE</span><span>ACTIVE TEAM</span><span>CONSENT</span><span>JOINED</span><span>LAST ACTIVE</span></div>{filtered.map((participant) => <div className="participant-row" key={participant.id}><span className="participant-identity"><strong>{participant.displayName}</strong><small>{participant.email || "Not collected"}</small></span><select aria-label={`Role for ${participant.displayName}`} value={participant.role} disabled={saving} onChange={(event) => void updateRole(participant, event.target.value as RegisteredParticipant["role"])}><option value="participant">Participant</option><option value="organizer">Organizer</option></select><select className="team-assignment-select" aria-label={`Active team for ${participant.displayName}`} value={participant.teamId || ""} disabled={saving} onChange={(event) => void moveParticipant(participant, event.target.value)}><option value="" disabled>Unassigned</option>{teams.filter((team) => team.workspaceKind === "team" || team.id === participant.teamId).map((team) => <option key={team.id} value={team.id}>{team.name} · {team.activeMembers}</option>)}<option value="personal">Create personal workspace…</option></select><span><b className={`pill ${participant.consentStatus === "accepted" ? "on-track" : "needs-help"}`}>{participant.consentStatus}</b><small className="consent-version">{participant.consentVersion}</small></span><span>{new Date(participant.joinedAt).toLocaleString()}</span><span>{new Date(participant.lastActive).toLocaleString()}</span></div>)}{!filtered.length && <p className="notes-empty">No registered users match this search.</p>}</div></section>
   </div>;
 }
 
@@ -1207,8 +1398,14 @@ function Admin() {
   useEffect(() => { const timer = window.setTimeout(() => void loadOrganizer(), 0); return () => window.clearTimeout(timer); }, []);
 
   async function updateSettings(assistantEnabled: boolean, quota = data?.settings.defaultTeamTokenQuota || 100000) {
-    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assistantEnabled, defaultTeamTokenQuota: quota }) });
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...data?.settings, assistantEnabled, defaultTeamTokenQuota: quota }) });
     if (response.ok) await loadOrganizer();
+  }
+
+  async function saveAllocation(settings: OrganizerData["settings"]) {
+    const response = await fetch("/api/organizer", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) setError(result.error || "AI allocation settings could not be saved."); else await loadOrganizer();
   }
 
   async function reviewSignal(signalId: string, decision: "approved" | "rejected" | "reviewing", editedSummary?: string, suggestedAction?: string) {
@@ -1254,15 +1451,16 @@ function Admin() {
   if (!data) return <div className="organizer-login"><span className="service-mark purple">▥</span><span className="eyebrow">PROTECTED ORGANIZER PORTAL</span><h2>{loading ? "Opening the control room…" : "Organizer access required."}</h2><p>Access is checked from the signed-in account role on the server.</p>{error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void loadOrganizer()} disabled={loading}>{loading ? "Loading…" : "Retry"}</button></div>;
 
   const totalTokens = Number(data.summary.inputTokens) + Number(data.summary.outputTokens);
-  const quota = Number(data.settings.defaultTeamTokenQuota);
   const visibleEvaluations = [...data.promptEvaluations].sort((a, b) => b.createdAt - a.createdAt).filter((item, index, items) => items.findIndex((candidate) => candidate.promptEventId === item.promptEventId) === index);
   const currentRubricIds = new Set(data.promptEvaluations.filter((item) => item.rubricVersion === "agentforge-process-coaching-v4").map((item) => item.promptEventId));
   const awaitingEvaluations = data.prompts.filter((item) => item.status === "success" && !currentRubricIds.has(item.id));
   return <>
+    <section className={`organizer-preflight ${data.preflight.databaseReady && data.preflight.emailConfigured && data.preflight.appOriginConfigured ? "ready" : "attention"}`}><div><span className="eyebrow">HACKATHON PREFLIGHT · EXPECTED {data.preflight.expectedParticipantScale} PARTICIPANTS</span><h3>{data.preflight.databaseReady && data.preflight.emailConfigured && data.preflight.appOriginConfigured ? "Identity infrastructure is ready for a live test." : "Complete setup before opening registration."}</h3><p>This checks required authentication/onboarding tables, transactional email, and the public callback origin without exposing secrets.</p></div><div><span className={data.preflight.databaseReady ? "ok" : "missing"}><b>{data.preflight.databaseReady ? "✓" : "!"}</b>Database schema</span><span className={data.preflight.emailConfigured ? "ok" : "missing"}><b>{data.preflight.emailConfigured ? "✓" : "!"}</b>Email delivery</span><span className={data.preflight.appOriginConfigured ? "ok" : "missing"}><b>{data.preflight.appOriginConfigured ? "✓" : "!"}</b>Public origin</span>{data.preflight.missingTables.length > 0 && <small>Missing: {data.preflight.missingTables.join(", ")}</small>}</div></section>
     {data.learningSignals.length > 0 && <section className="signal-review-queue"><div className="table-title"><div><h3>Human Review Queue</h3><p>Edit, approve, or reject Cognee interpretations before they influence tutorial changes.</p></div></div>{data.learningSignals.map((signal) => <div key={`review-${signal.id}`}><span><strong>{signal.page} · {signal.tutorialStep || "General"}</strong><small>{signal.reviewStatus}</small></span><button onClick={() => void editSignal(signal)}>Edit</button><button onClick={() => void reviewSignal(signal.id, "approved")} disabled={signal.reviewStatus === "approved"}>Approve</button><button onClick={() => void reviewSignal(signal.id, "rejected")} disabled={signal.reviewStatus === "rejected"}>Reject</button></div>)}</section>}
     <div className="live-admin-head"><div><span className="eyebrow">LIVE ORGANIZER PORTAL</span><h2>Prompt and Token Operations</h2><p>Connected to real AgentForge prompt events. Sensitive patterns are masked before display.</p></div><div><button className="outline-button" onClick={exportCsv}>Export CSV</button><button className="outline-button" onClick={() => void loadOrganizer()}>Refresh</button></div></div>
     <div className="metric-grid explained live-metrics"><article><small>TOTAL PROMPTS</small><strong>{data.summary.totalPrompts}</strong><span>{data.summary.lastHour} in the last hour</span><p>All recorded Assistant requests.</p></article><article><small>TOTAL TOKENS</small><strong>{totalTokens.toLocaleString()}</strong><span>{Number(data.summary.inputTokens).toLocaleString()} in · {Number(data.summary.outputTokens).toLocaleString()} out</span><p>Actual usage reported by OpenAI.</p></article><article><small>SUCCESS RATE</small><strong>{data.summary.successRate}%</strong><span>{100 - Number(data.summary.successRate)}% errors</span><p>Requests that returned a usable answer.</p></article><article><small>AVG. LATENCY</small><strong>{(Number(data.summary.avgLatencyMs) / 1000).toFixed(1)}s</strong><span>End-to-end response time</span><p>Includes OpenAI generation time.</p></article></div>
-    <section className="admin-controls"><div><span className={data.settings.assistantEnabled ? "control-dot on" : "control-dot"} /><span><small>AI ASSISTANT</small><strong>{data.settings.assistantEnabled ? "Running" : "Paused"}</strong></span><button className={data.settings.assistantEnabled ? "danger-button" : "primary"} onClick={() => void updateSettings(!data.settings.assistantEnabled)}>{data.settings.assistantEnabled ? "Pause assistant" : "Resume assistant"}</button></div><div><span><small>DEFAULT TEAM QUOTA</small><strong>{quota.toLocaleString()} tokens</strong></span><div className="quota-bar"><i style={{ width: `${Math.min(100, (totalTokens / quota) * 100)}%` }} /></div><button className="outline-button" onClick={() => { const next = window.prompt("Default tokens per team", String(quota)); if (next) void updateSettings(Boolean(data.settings.assistantEnabled), Number(next)); }}>Edit quota</button></div></section>
+    <section className="admin-controls"><div><span className={data.settings.assistantEnabled ? "control-dot on" : "control-dot"} /><span><small>AI ASSISTANT</small><strong>{data.settings.assistantEnabled ? "Running" : "Paused"}</strong></span><button className={data.settings.assistantEnabled ? "danger-button" : "primary"} onClick={() => void updateSettings(!data.settings.assistantEnabled)}>{data.settings.assistantEnabled ? "Pause assistant" : "Resume assistant"}</button></div><div><span><small>EVENT AI USAGE</small><strong>{totalTokens.toLocaleString()} / {Number(data.settings.eventTokenQuota).toLocaleString()} tokens</strong></span><div className="quota-bar"><i style={{ width: `${Math.min(100, (totalTokens / Math.max(1, Number(data.settings.eventTokenQuota))) * 100)}%` }} /></div><small>Change budgets and safeguards below.</small></div></section>
+    <AIAllocationControls settings={data.settings} totalTokens={totalTokens} onSave={saveAllocation} />
     {error && <p className="form-error organizer-error">{error}</p>}
     <section className="clawmax-operations"><div className="table-title"><div><span className="eyebrow">CLAWMAX PARTNER INGESTION</span><h3>Consent, delivery, normalization, and deletion</h3><p>Events appear here only after server authentication. Identity mapping and receipt validation happen before Prompt/Progress records or Cognee memory are created.</p></div><span>{data.clawmax?.connections.filter((item) => item.status === "active").length || 0} active connections</span></div><div className="clawmax-status-grid">{["quarantined", "mapped", "normalized", "rejected"].map((status) => <article key={status}><small>{status.toUpperCase()}</small><strong>{Number(data.clawmax?.status.find((item) => item.status === status)?.count || 0)}</strong><p>{status === "normalized" ? "Authorized evidence converted into AgentForge records." : status === "rejected" ? "Stored with a reviewable normalization reason." : status === "mapped" ? "Participant mapping resolved; normalization pending." : "Raw sanitized evidence awaiting authorization or mapping."}</p></article>)}</div><div className="clawmax-monitor-grid"><div><h4>Connected participants</h4>{data.clawmax?.connections.length ? data.clawmax.connections.slice(0, 20).map((item) => <article className="clawmax-connection-row" key={item.id}><span><strong>{item.participantDisplayName}</strong><small>{item.workspaceId}</small></span><span>{Number(item.activeReceipts)} active receipt{Number(item.activeReceipts) === 1 ? "" : "s"}</span><b className={`pill ${item.status === "active" ? "on-track" : "blocked"}`}>{item.status}</b></article>) : <p className="notes-empty">No participant has connected ClawMax yet.</p>}</div><div><h4>Recent delivery evidence</h4>{data.clawmax?.recent.length ? data.clawmax.recent.slice(0, 20).map((item) => <article className="clawmax-event-row" key={item.eventId}><span><strong>{item.source}</strong><small>{item.participantDisplayName || "Unmapped participant"} · {new Date(item.receivedAt).toLocaleString()}</small></span><b className={`memory-state ${item.normalizationStatus}`}>{item.normalizationStatus}</b>{item.normalizationError && <small title={item.normalizationError}>Review reason: {item.normalizationError}</small>}</article>) : <p className="notes-empty">No ClawMax events have been delivered yet.</p>}</div></div><div className="clawmax-purge-panel"><header><div><h4>Revocation & deletion status</h4><p>Local evidence is removed immediately. A job is not marked complete while Cognee deletion is still unresolved.</p></div><span>{data.clawmax?.purges.filter((item) => item.status !== "completed").length || 0} need attention</span></header>{data.clawmax?.purges.length ? data.clawmax.purges.slice(0, 20).map((item) => <article key={item.id}><span><strong>{item.participantDisplayName}</strong><small>{item.workspaceId} · receipt {item.receiptId.slice(0, 12)}…</small></span><span><b>{Number(item.rawEventsPurged)} raw</b><small>{Number(item.normalizedRecordsPurged)} normalized · {Number(item.cogneeRecordsPending)} Cognee pending</small></span><b className={`pill ${item.status === "completed" ? "on-track" : item.status === "error" ? "blocked" : "needs-help"}`}>{item.status}</b>{item.lastError && <small className="purge-error" title={item.lastError}>{item.lastError}</small>}</article>) : <p className="notes-empty">No deletion jobs have been requested.</p>}</div></section>
     <section className="cognee-operations"><div className="table-title"><div><span className="eyebrow">COGNEE SEMANTIC MEMORY</span><h3>Hackathon Learning Memory</h3><p>Prompts, responses, participant-model facts, project canvases, feedback, Shared Space notes, and tutorial content are organized by node set.</p></div><span className={`pill ${data.cognee.connected ? "on-track" : "needs-help"}`}>{data.cognee.connected ? "Cloud connected" : "API key required"}</span></div><div className="cognee-status-grid">{["pending", "syncing", "synced", "error"].map((status) => <div key={status}><small>{status.toUpperCase()}</small><strong>{Number(data.cognee.sync.find((item) => item.status === status)?.count || 0)}</strong><p>{status === "pending" ? "Memory events waiting for delivery." : status === "synced" ? "Events accepted and sent for graph processing." : status === "error" ? "Safe to retry; original operational records remain intact." : "Batch currently being delivered."}</p></div>)}</div><div className="cognee-action-guide"><span><b>1</b>Queue creates missing outbox records</span><i>→</i><span><b>2</b>Sync sends pending records to Cognee</span><i>→</i><span><b>3</b>Cognify runs in the background</span></div>{cogneeNotice && <div className="cognee-action-notice" role="status"><b>✓</b><span>{cogneeNotice}</span></div>}<div className="cognee-actions"><button className="outline-button" title="Queue the current ClawMax placeholder and Cognee tutorial summary. This does not crawl documentation." onClick={() => void runCognee("seed_tutorials")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "seed_tutorials" ? "Checking tutorials…" : "Queue tutorial memory"}</button><button className="outline-button" title="Find historical Prompts, projects, notes, and feedback that have not entered the Cognee outbox." onClick={() => void runCognee("backfill_all")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "backfill_all" ? "Checking history…" : "Backfill existing data"}</button><button className="outline-button" onClick={() => void runCognee("detect")} disabled={Boolean(cogneeAction)}>{cogneeAction === "detect" ? "Checking…" : "Detect learning signals"}</button><button className="outline-button" onClick={() => void runCognee("grade_prompts")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "grade_prompts" ? "Coaching…" : "Coach prompts with Cognee"}</button><button className="primary" onClick={() => void runCognee("sync")} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === "sync" ? "Syncing…" : "Sync all pending memory"}</button></div></section>
@@ -1411,6 +1609,40 @@ function DataPolicy({ onBack }: { onBack: () => void }) {
 
 type ClawMaxEnrollment = { id: string; destinationId: string; workspaceId: string; status: "active" | "revoked"; createdAt: number; updatedAt: number };
 
+function ParticipantProfileSettings() {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [responseLength, setResponseLength] = useState<ResponseLength>("brief");
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("guide");
+  const [status, setStatus] = useState<"loading" | "idle" | "saving" | "saved" | "error">("loading");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/onboarding", { cache: "no-store" }).then(async (response) => {
+      const result = await response.json() as { profile?: { answers?: Array<{ id: string; value: string }>; responseLength?: ResponseLength; interactionMode?: InteractionMode }; error?: string };
+      if (!response.ok) throw new Error(result.error || "Your profile could not be loaded.");
+      if (cancelled) return;
+      setValues(Object.fromEntries((result.profile?.answers || []).map((answer) => [answer.id, answer.value || ""])));
+      setResponseLength(result.profile?.responseLength || "brief");
+      setInteractionMode(result.profile?.interactionMode || "guide");
+      setStatus("idle");
+    }).catch((problem) => { if (!cancelled) { setStatus("error"); setMessage(problem instanceof Error ? problem.message : "Your profile could not be loaded."); } });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save() {
+    setStatus("saving"); setMessage("");
+    try {
+      const response = await fetch("/api/onboarding", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers: interviewerQuestions.map((question) => ({ id: question.id, value: values[question.id] || "" })), responseLength, interactionMode, changeSource: "participant_settings" }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Your profile could not be saved.");
+      setStatus("saved"); setMessage("Profile and response preferences saved. The previous version remains in your audit history.");
+    } catch (problem) { setStatus("error"); setMessage(problem instanceof Error ? problem.message : "Your profile could not be saved."); }
+  }
+
+  return <article className="setting-card profile-settings-card"><div className="setting-title"><span className="service-mark lime">P</span><div><h3>My profile & response preferences</h3><p>Update the background facts you reported during onboarding and how Ask AI should respond.</p></div><span className="pill">Participant controlled</span></div>{status === "loading" ? <p>Loading your profile…</p> : <><div className="profile-settings-grid">{interviewerQuestions.map((question) => <label key={question.id}><span>{question.prompt} <small>{question.required ? "Required" : "Optional"}</small></span><textarea rows={2} value={values[question.id] || ""} placeholder={question.placeholder} onChange={(event) => setValues((current) => ({ ...current, [question.id]: event.target.value }))} /></label>)}</div><InteractionPreferencePicker responseLength={responseLength} interactionMode={interactionMode} onLength={setResponseLength} onMode={setInteractionMode} compact />{message && <p className={status === "error" ? "form-error" : "connection-notice"}>{status === "error" ? "" : "✓ "}{message}</p>}<button className="primary" disabled={status === "saving"} onClick={() => void save()}>{status === "saving" ? "Saving…" : "Save profile & preferences"}</button></>}</article>;
+}
+
 function Settings({ setView }: { setView: (view: View) => void }) {
   const [enrollments, setEnrollments] = useState<ClawMaxEnrollment[]>([]);
   const [connectionNotice, setConnectionNotice] = useState("");
@@ -1459,6 +1691,7 @@ function Settings({ setView }: { setView: (view: View) => void }) {
 
   return <div className="settings-layout">
     <section><span className="eyebrow">CONNECTIONS & PRIVACY</span><h2>Keep access explicit.</h2><p>Open ClawMax from AgentForge and your signed-in event identity is linked automatically. No code, API key, or password needs to be copied.</p>
+      <ParticipantProfileSettings />
       <article className="setting-card clawmax-connect-card"><div className="setting-title"><span className="service-mark purple">C</span><div><h3>ClawMax activity sharing</h3><p>Connect consented ClawMax prompts and build activity to your AgentForge event record.</p></div><span className={active ? "pill on-track" : "pill needs-help"}>{active ? "Connected" : "Not connected"}</span></div>
         {active ? <><div className="connection-summary"><small>CONNECTED WORKSPACE</small><strong>{active.workspaceId}</strong><span>Only activity covered by an active, matching consent receipt is accepted.</span></div><div className="setting-actions"><small>You can stop future sharing at any time. Revocation immediately blocks new ingestion.</small><button className="outline-button danger" disabled={connectionBusy} onClick={() => void disconnect()}>{connectionBusy ? "Disconnecting…" : "Disconnect ClawMax"}</button></div></> : <><div className="connection-flow"><span><b>1</b>Open ClawMax</span><i>→</i><span><b>2</b>Review sharing scopes</span><i>→</i><span><b>3</b>Start building</span></div><div className="setting-actions"><small>Your identity is linked server-to-server. No passwords, Sessions, or Partner secrets are sent to ClawMax.</small><button className="primary" disabled={connectionBusy} onClick={() => void openClawMax()}>{connectionBusy ? "Opening ClawMax…" : "Open ClawMax & connect"}</button></div></>}
         {connectionNotice && <p className="connection-notice">✓ {connectionNotice}</p>}
@@ -1552,6 +1785,9 @@ type AssistantHistoryMessage = { id: string; parentPromptEventId?: string; conve
 function Assistant({ close, page, selectedContext, draft }: { close: () => void; page: string; selectedContext: string; draft?: { text: string; nonce: number } }) {
   const conversationId = useRef("");
   const [text, setText] = useState("");
+  // A new selection is an explicit user action; synchronizing it here keeps the
+  // open drawer while replacing its draft text.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (draft) setText(draft.text); }, [draft]);
   const [answer, setAnswer] = useState("");
   const [submittedPrompt, setSubmittedPrompt] = useState("");
@@ -1564,6 +1800,10 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
   const [historyLoading, setHistoryLoading] = useState(true);
   const [memoryUsed, setMemoryUsed] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "helpful" | "not_helpful" | "error">("idle");
+  const [responseLength, setResponseLength] = useState<ResponseLength>("brief");
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("guide");
+  const preferenceRef = useRef<{ responseLength: ResponseLength; interactionMode: InteractionMode }>({ responseLength: "brief", interactionMode: "guide" });
+  const [preferenceStatus, setPreferenceStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => { window.dispatchEvent(new CustomEvent("agentforge-assistant-working", { detail: loading })); }, [loading]);
 
@@ -1578,6 +1818,18 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
   }
 
   useEffect(() => { const timer = window.setTimeout(() => void loadHistory(), 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const timer = window.setTimeout(async () => { try { const response = await fetch("/api/onboarding", { cache: "no-store" }); const result = await response.json() as { profile?: { responseLength?: ResponseLength; interactionMode?: InteractionMode } | null }; if (response.ok && result.profile) { const next = { responseLength: result.profile.responseLength || "brief", interactionMode: result.profile.interactionMode || "guide" }; preferenceRef.current = next; setResponseLength(next.responseLength); setInteractionMode(next.interactionMode); } } catch { /* Defaults remain usable. */ } }, 0); return () => window.clearTimeout(timer); }, []);
+
+  async function savePreferences(nextLength: ResponseLength, nextMode: InteractionMode) {
+    preferenceRef.current = { responseLength: nextLength, interactionMode: nextMode };
+    setResponseLength(nextLength); setInteractionMode(nextMode); setPreferenceStatus("saving");
+    try {
+      const response = await fetch("/api/onboarding", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ responseLength: nextLength, interactionMode: nextMode }) });
+      if (!response.ok) throw new Error("Preferences could not be saved.");
+      setPreferenceStatus("saved");
+      window.setTimeout(() => setPreferenceStatus("idle"), 1600);
+    } catch { setPreferenceStatus("error"); }
+  }
 
   async function ask() {
     if (!text.trim() || loading) return;
@@ -1631,5 +1883,5 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
 
   const visibleHistory = history.filter((item) => item.id !== promptEventId);
   const hasConversation = visibleHistory.length > 0 || Boolean(submittedPrompt);
-  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Recalling relevant Cognee memory, then answering.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "NO MATCHING MEMORY"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button className={feedbackStatus === "helpful" ? "feedback-selected" : ""} onClick={() => void saveFeedback("helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "helpful" ? "✓ Helpful" : "Helpful"}</button><button className={feedbackStatus === "not_helpful" ? "feedback-selected negative" : ""} onClick={() => void saveFeedback("not_helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "not_helpful" ? "✓ Not helpful" : "Not helpful"}</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to shared space" : brainStatus === "error" ? "Try adding again" : "＋ Add to shared space"}</button></div>{feedbackStatus === "saving" && <small className="feedback-confirmation">Saving feedback…</small>}{feedbackStatus === "error" && <small className="feedback-confirmation error">Feedback was not saved. Please try again.</small>}{(feedbackStatus === "helpful" || feedbackStatus === "not_helpful") && <small className="feedback-confirmation">Feedback saved and linked to this response.</small>}</div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use this page, selected text, and relevant Cognee memory. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored from Prompt Tracking. Never paste credentials.</small></footer></aside></div>;
+  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><details className="assistant-preferences"><summary><span>Response style</span><b>{responseLength} · {interactionMode}</b></summary><InteractionPreferencePicker compact responseLength={responseLength} interactionMode={interactionMode} onLength={(value) => void savePreferences(value, preferenceRef.current.interactionMode)} onMode={(value) => void savePreferences(preferenceRef.current.responseLength, value)} /><small className={preferenceStatus === "error" ? "error" : ""}>{preferenceStatus === "saving" ? "Saving…" : preferenceStatus === "saved" ? "Saved" : preferenceStatus === "error" ? "Could not save" : "Change this at any time"}</small></details><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Recalling relevant Cognee memory, then answering.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "NO MATCHING MEMORY"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button className={feedbackStatus === "helpful" ? "feedback-selected" : ""} onClick={() => void saveFeedback("helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "helpful" ? "✓ Helpful" : "Helpful"}</button><button className={feedbackStatus === "not_helpful" ? "feedback-selected negative" : ""} onClick={() => void saveFeedback("not_helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "not_helpful" ? "✓ Not helpful" : "Not helpful"}</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to shared space" : brainStatus === "error" ? "Try adding again" : "＋ Add to shared space"}</button></div>{feedbackStatus === "saving" && <small className="feedback-confirmation">Saving feedback…</small>}{feedbackStatus === "error" && <small className="feedback-confirmation error">Feedback was not saved. Please try again.</small>}{(feedbackStatus === "helpful" || feedbackStatus === "not_helpful") && <small className="feedback-confirmation">Feedback saved and linked to this response.</small>}</div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll start small, use your preferred response style, and give you a clear next step. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored from Prompt Tracking. Never paste credentials.</small></footer></aside></div>;
 }
