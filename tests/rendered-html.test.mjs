@@ -390,6 +390,10 @@ test("builds a resumable participant-authored Agent Blueprint with optional insp
   assert.match(portal, /Import POs into QuickBooks/);
   assert.match(portal, /Human checkpoints/);
   assert.match(portal, /Success & failure test/);
+  assert.match(portal, /Select one or more settings/);
+  assert.match(portal, /OTHER SETTINGS · UP TO 3/);
+  assert.match(portal, /customOther\.length < 3/);
+  assert.doesNotMatch(portal, /Other or mixed/);
   assert.doesNotMatch(portal, /DRAFT BUILD BRIEF/);
   assert.match(canvas, /draft_autosave/);
   assert.match(canvas, /example_opened/);

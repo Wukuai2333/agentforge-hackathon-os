@@ -34,7 +34,7 @@ const demoPrivacySections = [
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
 
-type BlueprintAnswer = { selections: string[]; detail: string };
+type BlueprintAnswer = { selections: string[]; detail: string; customOther?: string[] };
 type BlueprintAnswers = Record<string, BlueprintAnswer>;
 type BlueprintQuestion = {
   id: string;
@@ -51,7 +51,7 @@ type BlueprintQuestion = {
 };
 
 const agentBlueprintQuestions: BlueprintQuestion[] = [
-  { id: "context", label: "User & context", prompt: "Where in your life or work should this agent help?", helper: "Choose the closest setting, then add only the context that changes what the agent should do.", choices: ["Personal life", "Academic or learning", "Professional or company", "Community or public service", "Other or mixed"], detailLabel: "Who is this for, and what situation are they in?", placeholder: "For example: a graduate student balancing courses, research, and recruiting…", example: "Academic or learning — I am a graduate student who needs to keep course deadlines and project commitments from colliding." },
+  { id: "context", label: "User & context", prompt: "Where in your life or work should this agent help?", helper: "Select one or more settings, then add only the context that changes what the agent should do.", choices: ["Personal life", "Academic or learning", "Professional or company", "Community or public service", "Other"], multiple: true, detailLabel: "Who is this for, and what situation are they in?", placeholder: "For example: a graduate student balancing courses, research, and recruiting…", example: "Academic or learning — I am a graduate student who needs to keep course deadlines and project commitments from colliding." },
   { id: "problem", label: "Problem", prompt: "What repeated problem is worth solving?", helper: "Describe one concrete moment of friction. Avoid naming an agent before the problem is clear.", choices: ["Repetitive manual work", "Information is scattered", "Important follow-ups are missed", "Monitoring takes too much time", "Decisions lack context", "Coordination breaks down"], multiple: true, detailRequired: true, detailLabel: "What happens today, and why is it frustrating?", placeholder: "Every week I…, but I often…", example: "Every weekday I scan several sources for relevant account news, but I miss changes and spend too long deciding what matters." },
   { id: "trigger", label: "Trigger", prompt: "What should tell the agent that it is time to act?", helper: "A precise trigger turns a broad idea into a workflow you can test.", choices: ["A schedule", "A new message or file", "A user request", "A deadline or milestone", "A change in monitored data", "Another system event"], detailRequired: true, detailLabel: "Make the trigger specific.", placeholder: "At 8:00 a.m. every weekday… / When a purchase-order email arrives…", example: "At 8:00 a.m. every weekday, before my first meeting." },
   { id: "inputs", label: "Inputs & boundaries", prompt: "What information may the agent use—and what stays off limits?", helper: "Select likely sources, then state freshness, privacy, or access boundaries.", choices: ["Email or messages", "Documents or notes", "Calendar or tasks", "Web or news", "Business system or API", "Manual user input"], multiple: true, detailRequired: true, detailLabel: "What must be current, private, or excluded?", placeholder: "It may read…, but it must never…", example: "It may read my calendar and project notes, but not personal email; news must be less than 24 hours old." },
@@ -782,7 +782,7 @@ function Overview({ setView }: { setView: (view: View) => void }) {
 }
 
 function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => void; onOpenUseCase: (id: string) => void }) {
-  const emptyAnswers = () => Object.fromEntries(agentBlueprintQuestions.map((question) => [question.id, { selections: [], detail: "" }])) as BlueprintAnswers;
+  const emptyAnswers = () => Object.fromEntries(agentBlueprintQuestions.map((question) => [question.id, { selections: [], detail: "", customOther: [] }])) as BlueprintAnswers;
   const [answers, setAnswers] = useState<BlueprintAnswers>(emptyAnswers);
   const [currentStep, setCurrentStep] = useState(0);
   const [status, setStatus] = useState<"draft" | "completed">("draft");
@@ -836,16 +836,19 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     return () => window.clearTimeout(timer);
   }, [answers, currentStep, hydrated, question?.id]);
 
-  const answerFor = (id: string) => answers[id] || { selections: [], detail: "" };
+  const answerFor = (id: string) => answers[id] || { selections: [], detail: "", customOther: [] };
   const hasAnswer = (item: BlueprintQuestion) => {
     const value = answerFor(item.id);
     if (item.optional) return true;
     if (item.detailRequired && !value.detail.trim()) return false;
+    if (value.selections.includes("Other") && !(value.customOther || []).some((entry) => entry.trim())) return false;
     return Boolean(value.detail.trim() || value.selections.length);
   };
   const summaryFor = (item: BlueprintQuestion) => {
     const value = answerFor(item.id);
-    return [...value.selections, value.detail.trim()].filter(Boolean).join(" · ");
+    const selected = value.selections.filter((selection) => selection !== "Other");
+    const other = (value.customOther || []).map((entry) => entry.trim()).filter(Boolean).map((entry) => `Other: ${entry}`);
+    return [...selected, ...other, value.detail.trim()].filter(Boolean).join(" · ");
   };
   const updateDetail = (value: string) => {
     if (!question) return;
@@ -857,7 +860,17 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     const current = answerFor(question.id);
     const selections = question.multiple ? current.selections.includes(choice) ? current.selections.filter((item) => item !== choice) : [...current.selections, choice] : [choice];
     setStatus("draft");
-    setAnswers((items) => ({ ...items, [question.id]: { ...current, selections } }));
+    setAnswers((items) => ({ ...items, [question.id]: { ...current, selections, customOther: choice === "Other" && !selections.includes("Other") ? [] : current.customOther } }));
+  };
+  const updateOther = (index: number, value: string) => {
+    if (!question) return;
+    const current = answerFor(question.id);
+    const customOther = current.customOther?.length ? [...current.customOther] : [""];
+    customOther[index] = value;
+    while (customOther.length > 1 && !customOther.at(-1)?.trim() && !customOther.at(-2)?.trim()) customOther.pop();
+    if (value.trim() && index === customOther.length - 1 && customOther.length < 3) customOther.push("");
+    setStatus("draft");
+    setAnswers((items) => ({ ...items, [question.id]: { ...current, customOther } }));
   };
   async function recordEvent(eventType: string, questionId: string, nextStep = currentStep) {
     try {
@@ -906,7 +919,8 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
           <span className="question-section-label">{question.label}{question.optional ? " · OPTIONAL" : ""}</span>
           <h3>{question.prompt}</h3><p>{question.helper}</p>
           <div className={`blueprint-choice-grid ${question.multiple ? "multiple" : "single"}`}>{question.choices.map((choice) => { const selected = answerFor(question.id).selections.includes(choice); return <button type="button" key={choice} className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => toggleChoice(choice)}><span>{selected ? "✓" : "+"}</span>{choice}</button>; })}</div>
-          <label className="blueprint-detail-label">{question.detailLabel}<textarea autoFocus rows={5} value={answerFor(question.id).detail} onChange={(event) => updateDetail(event.target.value)} placeholder={question.placeholder} /></label>
+          {question.id === "context" && answerFor(question.id).selections.includes("Other") && <fieldset className="blueprint-other-fields"><legend>OTHER SETTINGS · UP TO 3</legend>{(answerFor(question.id).customOther?.length ? answerFor(question.id).customOther! : [""]).map((entry, index) => <label key={index}><span>Other {index + 1}</span><input autoFocus={index === 0 && !entry} value={entry} onChange={(event) => updateOther(index, event.target.value)} placeholder="Describe another setting…" /></label>)}</fieldset>}
+          <label className="blueprint-detail-label">{question.detailLabel}<textarea autoFocus={!(question.id === "context" && answerFor(question.id).selections.includes("Other"))} rows={5} value={answerFor(question.id).detail} onChange={(event) => updateDetail(event.target.value)} placeholder={question.placeholder} /></label>
           <details className="blueprint-example" onToggle={(event) => { if (event.currentTarget.open) void recordEvent("example_opened", question.id); }}><summary>I need an example</summary><p>{question.example}</p><small>Use the structure, not the wording. Your own situation is the useful evidence.</small></details>
           {error && <p className="form-error">{error}</p>}
           <footer className="agent-design-actions"><button className="text-button" disabled={currentStep === 0} onClick={() => { setError(""); setCurrentStep((step) => Math.max(0, step - 1)); }}>← Previous</button><span>You can edit every answer from the Blueprint.</span><button className="primary" onClick={() => void continueForward()}>{currentStep === agentBlueprintQuestions.length - 1 ? "Review blueprint →" : "Next question →"}</button></footer>
