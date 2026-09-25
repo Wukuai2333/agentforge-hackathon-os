@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CompanyBrainTutorial } from "./company-brain-tutorial";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
+type View = "home" | "onboarding" | "useCases" | "learn" | "clawmaxTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
 type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type ResponseLength = "brief" | "balanced" | "detailed";
@@ -61,20 +61,31 @@ const agentBlueprintQuestions: BlueprintQuestion[] = [
   { id: "memory", label: "Memory & reporting", prompt: "What should persist, and how should the agent report back?", helper: "Optional · Store only context that makes future work better. Do not retain secrets just because storage is available.", choices: ["Remember preferences", "Remember prior decisions", "Remember people or projects", "No long-term memory", "Send a concise summary", "Notify only on exceptions"], multiple: true, optional: true, detailLabel: "Add a memory boundary or preferred output.", placeholder: "Remember…, forget…, and report by…", example: "Remember my priority accounts and accepted recommendations, but not raw email bodies. Send a five-item morning brief." },
 ];
 
-const inspirationCases = [
-  ["Go-To-Market", "Daily GTM Brief"],
-  ["Go-To-Market", "Research This Prospect"],
-  ["Finance", "Import POs into QuickBooks"],
-  ["Education", "Schedule Manager for Students"],
-  ["Finance", "Stock News Monitor"],
-  ["Education", "Grading Agents for Instructors"],
-  ["Education", "Teamwork Agent for Students"],
-  ["Events", "Event Topic Monitoring"],
-  ["Events", "Speaker & Sponsor Monitoring"],
-  ["Career", "Job Application & Employer Response Agent"],
-] as const;
+type UseCaseIllustration = {
+  id: string;
+  category: string;
+  title: string;
+  challenge: string;
+  role: string;
+  flow: string[];
+  inputs: string[];
+  checkpoint: string;
+  evidence: string;
+  questions: string[];
+};
 
-const useCaseDocumentUrl = "https://docs.google.com/document/d/1Y7Cfkbg5sqrW9xliJhMAlbSepcigFmvqMp9TxrEhSrM/edit?tab=t.0#heading=h.bzhzgtzagfd7";
+const inspirationCases: UseCaseIllustration[] = [
+  { id: "daily-gtm", category: "Go-To-Market", title: "Daily GTM Brief", challenge: "Important account updates, meetings, and follow-ups are spread across several places, so the user starts each day by manually deciding what matters.", role: "Create a short, ranked morning action brief—not a generic news digest.", flow: ["Wake on a weekday schedule", "Review approved account, conversation, meeting, and news context", "Rank five actions by likely impact", "Explain why each action matters and suggest the next move"], inputs: ["Target-account list", "Recent conversations", "Calendar", "Relevant company news", "Open follow-ups"], checkpoint: "The user approves any external message or CRM change. Ranking and summarization may run automatically.", evidence: "Compare the brief with the user's own priorities: Was an important action missed? How long did prioritization take?", questions: ["What evidence should determine impact?", "Which sources must be current today?", "What should the agent never send automatically?"] },
+  { id: "prospect-research", category: "Go-To-Market", title: "Research This Prospect", challenge: "A seller needs a useful account hypothesis without spending an hour assembling company, product, buyer, and technical context.", role: "Build an evidence-linked prospect snapshot and identify plausible reasons to start a conversation.", flow: ["Receive a company name", "Gather current public and approved internal context", "Separate observed facts from hypotheses", "Recommend three buying reasons and likely contacts"], inputs: ["Company website", "Recent company news", "Product information", "Approved account notes"], checkpoint: "A person verifies contact details and buying hypotheses before outreach.", evidence: "Check whether each important claim has a source and whether the suggested pain points fit the company rather than any generic prospect.", questions: ["Which claims are facts and which are inferences?", "How recent must company developments be?", "What would make you reject a buying hypothesis?"] },
+  { id: "quickbooks-po", category: "Finance", title: "Import POs into QuickBooks", challenge: "Purchase-order discussions arrive by email and are manually interpreted before someone updates QuickBooks.", role: "Find likely PO conversations, extract structured fields, and prepare—not silently execute—a verified accounting update.", flow: ["Detect an approved PO-related email", "Extract vendor, amount, items, dates, and references", "Flag missing or conflicting fields", "Show a review summary", "Submit to QuickBooks only after approval"], inputs: ["Approved email thread", "Purchase-order attachment", "QuickBooks API", "Vendor rules"], checkpoint: "A person must approve financial fields and the final QuickBooks write.", evidence: "Test with complete, incomplete, and contradictory purchase orders; record extraction errors and prevented bad writes.", questions: ["Which fields are required before submission?", "How should the agent handle conflicting totals?", "Where is human approval mandatory?"] },
+  { id: "student-schedule", category: "Education", title: "Schedule Manager for Students", challenge: "Deadlines, classes, work, and personal commitments compete for limited time and are easy to overlook.", role: "Turn approved commitments into a realistic plan while leaving priorities and trade-offs to the student.", flow: ["Collect deadlines and fixed commitments", "Identify conflicts and available work blocks", "Propose a weekly plan", "Ask the student to approve trade-offs", "Update only confirmed changes"], inputs: ["Course deadlines", "Calendar", "Estimated task effort", "Student preferences"], checkpoint: "The student confirms priorities, workload estimates, and calendar changes.", evidence: "Track missed conflicts, unrealistic time estimates, and whether the student actually followed or revised the plan.", questions: ["Which commitments cannot move?", "How will the agent detect an unrealistic plan?", "What should be remembered next week?"] },
+  { id: "stock-news", category: "Finance", title: "Stock News Monitor", challenge: "A user wants timely company updates without confusing news summarization with financial advice.", role: "Monitor selected sources, group related developments, and explain why an update may deserve review.", flow: ["Monitor a defined company list", "Collect recent items from approved sources", "Deduplicate and categorize events", "Notify only when a threshold is met", "Present sources and uncertainty"], inputs: ["Watchlist", "Approved news sources", "Time window", "Alert criteria"], checkpoint: "The user makes every investment decision; the agent never trades or presents a forecast as fact.", evidence: "Measure duplicate alerts, missed material events, source quality, and false urgency.", questions: ["What counts as a material event?", "How will you distinguish fact from interpretation?", "When should the agent stay quiet?"] },
+  { id: "grading-support", category: "Education", title: "Grading Support for Instructors", challenge: "Instructors spend time organizing evidence and drafting feedback, but final academic judgment requires human responsibility.", role: "Organize rubric-linked evidence and draft feedback for instructor review—not assign an unquestioned final grade.", flow: ["Load the instructor's rubric", "Review the submitted work", "Link observations to rubric criteria", "Identify uncertainty or missing evidence", "Present a draft for instructor revision"], inputs: ["Assignment", "Rubric", "Instructor examples", "Course policy"], checkpoint: "The instructor reviews every consequential judgment and owns the final feedback and grade.", evidence: "Compare evidence links, instructor edits, disagreement patterns, and false claims across varied submissions.", questions: ["Which judgment cannot be delegated?", "What evidence supports each comment?", "How will students contest an error?"] },
+  { id: "student-teamwork", category: "Education", title: "Teamwork Agent for Students", challenge: "Teams lose decisions, duplicate work, and discover ownership gaps too late.", role: "Maintain a shared view of decisions, responsibilities, blockers, and unresolved questions.", flow: ["Capture an approved meeting summary", "Extract decisions and proposed owners", "Ask members to confirm assignments", "Track blockers and approaching deadlines", "Prepare the next meeting brief"], inputs: ["Meeting notes", "Team task list", "Project milestones", "Member confirmations"], checkpoint: "Members confirm ownership and can correct summaries; the agent cannot assign blame or silently change commitments.", evidence: "Measure corrected summaries, unowned tasks, missed deadlines, and whether reminders helped without becoming noise.", questions: ["What requires explicit member confirmation?", "Which team information should remain private?", "When is a reminder useful rather than annoying?"] },
+  { id: "event-topics", category: "Events", title: "Event Topic Monitoring", challenge: "Organizers need to understand emerging participant interests and repeated questions while an event is moving quickly.", role: "Cluster consented questions into topics and surface actionable gaps without treating AI labels as ground truth.", flow: ["Collect consented questions", "Group semantically related issues", "Count recurring themes", "Link each theme to examples", "Suggest where instructions or support may need attention"], inputs: ["Consented questions", "Page or stage context", "Timestamps", "Organizer-approved categories"], checkpoint: "Organizers review clusters and decide whether to change event guidance.", evidence: "Audit whether clusters link back to real examples and whether an intervention reduces repeated confusion.", questions: ["What is the unit of analysis?", "How will you preserve evidence behind a cluster?", "Which conclusions require organizer review?"] },
+  { id: "speaker-sponsor", category: "Events", title: "Speaker & Sponsor Monitoring", challenge: "Relevant announcements, commitments, and follow-ups can be missed across many event communications.", role: "Track approved speaker and sponsor updates and produce exception-focused summaries.", flow: ["Monitor selected channels", "Extract commitments, changes, and deadlines", "Match updates to the correct contact", "Flag conflicts or missing confirmations", "Prepare an organizer review list"], inputs: ["Approved messages", "Contact list", "Event schedule", "Sponsor commitments"], checkpoint: "An organizer verifies sensitive claims and sends all external communication.", evidence: "Track missed commitments, false matches, outdated schedule details, and organizer corrections.", questions: ["Which channels are in scope?", "What makes an update urgent?", "How will the agent avoid mixing two contacts?"] },
+  { id: "job-application", category: "Career", title: "Job Application & Employer Response Agent", challenge: "Applicants lose track of versions, deadlines, contacts, and promised follow-ups across many applications.", role: "Maintain a private application timeline and recommend the next reviewable action.", flow: ["Record an application and role", "Track approved messages and deadlines", "Summarize status changes", "Draft a follow-up when appropriate", "Ask the applicant to review before sending"], inputs: ["Application tracker", "Job description", "Approved employer messages", "Calendar"], checkpoint: "The applicant approves every message and decides what personal information is retained.", evidence: "Check status accuracy, duplicate or premature reminders, and whether drafts remain truthful to the applicant's experience.", questions: ["What personal data should not persist?", "When is a follow-up actually appropriate?", "How will the applicant verify a draft?"] },
+];
 
 const interviewerQuestions: Array<{ id: string; prompt: string; helper: string; placeholder: string; required: boolean; example?: string; choices?: string[] }> = [
   { id: "introduction", prompt: "First, tell me a little about yourself.", helper: "Optional · Share only what feels useful for supporting you during this hackathon.", placeholder: "What do you do, and what brought you here?", required: false, example: "Example: I am a product-design student exploring agents for research workflows." },
@@ -452,6 +463,7 @@ export function HackathonPortal() {
   const [assistantContext, setAssistantContext] = useState("");
   const [selectionAction, setSelectionAction] = useState<SelectionAction>(null);
   const [selectionCoachVisible, setSelectionCoachVisible] = useState(false);
+  const [selectedUseCaseId, setSelectedUseCaseId] = useState(inspirationCases[0].id);
   const [assistantDraft, setAssistantDraft] = useState<{ text: string; nonce: number } | undefined>();
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [publishedAnnouncements, setPublishedAnnouncements] = useState<PublishedAnnouncement[]>([]);
@@ -497,7 +509,7 @@ export function HackathonPortal() {
   }, []);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
+    const validViews: View[] = ["home", "onboarding", "useCases", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -608,7 +620,7 @@ export function HackathonPortal() {
     }
   }
 
-  const title = view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview";
+  const title = view === "useCases" ? "Use Case Illustrations" : view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview";
 
   function enterPortal(user: PortalUser) {
     setPortalUser(user);
@@ -636,7 +648,7 @@ export function HackathonPortal() {
 
   useEffect(() => {
     if (!portalUser || !perspectiveReady) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
+    const participantViews: View[] = ["home", "onboarding", "useCases", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const showingParticipant = portalUser.role !== "organizer" || organizerParticipantMode;
     const allowed = showingParticipant ? participantViews : organizerViews;
@@ -698,8 +710,9 @@ export function HackathonPortal() {
           {selectionCoachVisible && participantSurface && view === "home" && <aside className="selection-coach" aria-label="Text selection tutorial"><div className="selection-coach-orbit" aria-hidden="true"><i /><i /><span>✦</span></div><div><span className="eyebrow">TRY ASK AI IN CONTEXT</span><strong>Select the sentence below, then choose what to do.</strong><p className="selection-practice-line">What should my agent remember, what should it verify, and where should I stay in control?</p></div><button type="button" aria-label="Dismiss text selection tutorial" onClick={completeSelectionCoach}>×</button></aside>}
           {view === "home" && <Overview setView={setView} />}
           {view === "onboarding" && (
-            <AgentCanvas onOpenClawMax={() => void openClawMaxFromNavigation()} />
+            <AgentCanvas onOpenClawMax={() => void openClawMaxFromNavigation()} onOpenUseCase={(id) => { setSelectedUseCaseId(id); setView("useCases"); }} />
           )}
+          {view === "useCases" && <UseCaseLibrary initialId={selectedUseCaseId} onBack={() => setView("onboarding")} onUse={(id) => { setSelectedUseCaseId(id); setView("onboarding"); }} />}
           {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
           {view === "clawmaxTutorial" && <ClawMaxTutorial onOpen={() => void openClawMaxFromNavigation()} />}
           {view === "companyBrainTutorial" && <CompanyBrainTutorial onBack={() => setView("learn")} onAsk={(text, context) => { setAssistantContext(context); setAssistantDraft({ text, nonce: Date.now() }); openAssistant(); }} />}
@@ -768,7 +781,7 @@ function Overview({ setView }: { setView: (view: View) => void }) {
   </>;
 }
 
-function AgentCanvas({ onOpenClawMax }: { onOpenClawMax: () => void }) {
+function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => void; onOpenUseCase: (id: string) => void }) {
   const emptyAnswers = () => Object.fromEntries(agentBlueprintQuestions.map((question) => [question.id, { selections: [], detail: "" }])) as BlueprintAnswers;
   const [answers, setAnswers] = useState<BlueprintAnswers>(emptyAnswers);
   const [currentStep, setCurrentStep] = useState(0);
@@ -884,7 +897,7 @@ function AgentCanvas({ onOpenClawMax }: { onOpenClawMax: () => void }) {
 
   return <div className="agent-design-page">
     <header className="agent-design-intro"><div><span className="eyebrow">PROBLEM DISCOVERY · NOT A PROMPT TEMPLATE</span><h2>Design the problem before the agent.</h2><p>Answer one question at a time. Your choices become a live blueprint you can revise before opening ClawMax.</p></div><div className={`blueprint-save-state ${saveState}`}><i />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : saveState === "saved" ? "Saved" : "Autosave ready"}</div></header>
-    <details className="inspiration-drawer"><summary><span><b>Need inspiration?</b> Browse use cases without copying a full prompt.</span><small>Optional · opens the source Google Doc ↗</small></summary><div className="inspiration-grid">{inspirationCases.map(([category, title]) => <a key={title} href={useCaseDocumentUrl} target="_blank" rel="noreferrer"><small>{category}</small><strong>{title}</strong><span>Open reference ↗</span></a>)}</div></details>
+    <details className="inspiration-drawer"><summary><span><b>Need inspiration?</b> Browse use cases without copying a full prompt.</span><small>Optional · explore illustrations inside AgentForge</small></summary><div className="inspiration-grid">{inspirationCases.map((item) => <button type="button" key={item.id} onClick={() => onOpenUseCase(item.id)}><small>{item.category}</small><strong>{item.title}</strong><span>See how it works →</span></button>)}</div></details>
     <div className="agent-design-workspace">
       <section className="agent-design-question" aria-live="polite">
         {!complete && question ? <>
@@ -900,6 +913,34 @@ function AgentCanvas({ onOpenClawMax }: { onOpenClawMax: () => void }) {
         </> : <div className="blueprint-review"><span className="eyebrow">READY FOR YOUR REVIEW</span><h3>Your first Agent Blueprint is assembled.</h3><p>This is still your draft. Read the evidence on the right, edit anything that feels generic, then save it as your project starting point.</p><div className="blueprint-review-checks"><span>✓ A concrete problem</span><span>✓ A bounded workflow</span><span>✓ Human review points</span><span>✓ A visible success test</span></div>{error && <p className="form-error">{error}</p>}<div className="blueprint-review-actions"><button className="text-button" onClick={() => setCurrentStep(agentBlueprintQuestions.length - 1)}>← Edit last answer</button><button className="primary" disabled={saveState === "saving"} onClick={() => void completeBlueprint()}>{saveState === "saving" ? "Saving blueprint…" : status === "completed" ? "Save updated blueprint" : "Save Agent Blueprint"}</button></div>{status === "completed" && <div className="blueprint-complete"><div><b>Blueprint saved</b><span>Project {projectId?.slice(0, 8)}… is ready to build.</span></div><button type="button" onClick={onOpenClawMax}>Open ClawMax to build ↗</button></div>}</div>}
       </section>
       <aside className="agent-blueprint-live"><header><div><span className="eyebrow">PARTICIPANT AGENT BLUEPRINT</span><h3>Your design, in your words.</h3></div><small>{agentBlueprintQuestions.filter((item) => summaryFor(item)).length}/{agentBlueprintQuestions.length} sections</small></header><div>{agentBlueprintQuestions.map((item, index) => { const summary = summaryFor(item); return <article key={item.id} className={summary ? "filled" : currentStep === index ? "active" : ""}><div><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{item.label}</strong><p>{summary || (item.optional ? "Optional — not defined" : "Waiting for your answer")}</p></span></div><button type="button" onClick={() => { setError(""); setCurrentStep(index); void recordEvent("answer_revisited", item.id, index); }}>{summary ? "Edit" : "Add"}</button></article>; })}</div><footer><strong>This is not a generated prompt.</strong><span>It is a participant-authored record of the problem, boundaries, workflow, and test.</span></footer></aside>
+    </div>
+  </div>;
+}
+
+function UseCaseLibrary({ initialId, onBack, onUse }: { initialId: string; onBack: () => void; onUse: (id: string) => void }) {
+  const [activeId, setActiveId] = useState(inspirationCases.some((item) => item.id === initialId) ? initialId : inspirationCases[0].id);
+  const [category, setCategory] = useState("All");
+  const categories = ["All", ...new Set(inspirationCases.map((item) => item.category))];
+  const visibleCases = category === "All" ? inspirationCases : inspirationCases.filter((item) => item.category === category);
+  const active = inspirationCases.find((item) => item.id === activeId) || inspirationCases[0];
+
+  return <div className="use-case-page">
+    <header className="use-case-hero"><div><span className="eyebrow">ILLUSTRATIONS · NOT TEMPLATES</span><h2>See the decisions behind an agent.</h2><p>Each example shows a problem, a bounded workflow, a human checkpoint, and a way to test whether the agent is useful. Borrow the reasoning pattern—not the wording.</p></div><button type="button" className="outline-button" onClick={onBack}>← Back to my blueprint</button></header>
+    <nav className="use-case-filters" aria-label="Filter use cases">{categories.map((item) => <button type="button" key={item} className={category === item ? "active" : ""} onClick={() => { setCategory(item); const first = item === "All" ? inspirationCases[0] : inspirationCases.find((entry) => entry.category === item); if (first) setActiveId(first.id); }}>{item}</button>)}</nav>
+    <div className="use-case-layout">
+      <aside className="use-case-index" aria-label="Use case list">{visibleCases.map((item, index) => <button type="button" key={item.id} className={active.id === item.id ? "active" : ""} onClick={() => setActiveId(item.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><small>{item.category}</small><strong>{item.title}</strong><p>{item.challenge}</p></div><b>→</b></button>)}</aside>
+      <article className="use-case-illustration" key={active.id}>
+        <header><div><span className="eyebrow">{active.category.toUpperCase()} · USE CASE ILLUSTRATION</span><h3>{active.title}</h3><p>{active.challenge}</p></div><span className="use-case-number">{String(inspirationCases.findIndex((item) => item.id === active.id) + 1).padStart(2, "0")}</span></header>
+        <section className="use-case-role"><small>THE AGENT'S BOUNDED ROLE</small><strong>{active.role}</strong></section>
+        <section className="use-case-flow"><div className="use-case-section-heading"><small>WORKFLOW</small><span>Trigger → evidence → action → review</span></div><ol>{active.flow.map((step, index) => <li key={step}><b>{index + 1}</b><span>{step}</span></li>)}</ol></section>
+        <div className="use-case-two-column">
+          <section><small>INPUTS IN SCOPE</small><ul>{active.inputs.map((input) => <li key={input}>{input}</li>)}</ul></section>
+          <section className="human-checkpoint"><small>HUMAN CHECKPOINT</small><p>{active.checkpoint}</p></section>
+        </div>
+        <section className="use-case-evidence"><small>WHAT WOULD COUNT AS EVIDENCE?</small><p>{active.evidence}</p></section>
+        <section className="use-case-questions"><div><small>QUESTIONS TO TAKE BACK TO YOUR DESIGN</small><h4>Make your own choices explicit.</h4></div><ol>{active.questions.map((question) => <li key={question}>{question}</li>)}</ol></section>
+        <footer><p><b>No ready-made prompt.</b> Your next step is to answer the blueprint questions using your own context, boundaries, and success test.</p><button type="button" className="primary" onClick={() => onUse(active.id)}>Return to my Agent Blueprint →</button></footer>
+      </article>
     </div>
   </div>;
 }

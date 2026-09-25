@@ -381,8 +381,11 @@ test("builds a resumable participant-authored Agent Blueprint with optional insp
   assert.match(portal, /one question at a time/i);
   assert.match(portal, /PARTICIPANT AGENT BLUEPRINT/);
   assert.match(portal, /I need an example/);
-  assert.match(portal, /target="_blank"/);
-  assert.match(portal, /docs\.google\.com\/document\/d\/1Y7Cfkbg5sqrW9xliJhMAlbSepcigFmvqMp9TxrEhSrM/);
+  assert.doesNotMatch(portal, /docs\.google\.com\/document\/d\/1Y7Cfkbg5sqrW9xliJhMAlbSepcigFmvqMp9TxrEhSrM/);
+  assert.match(portal, /Use Case Illustrations/);
+  assert.match(portal, /ILLUSTRATIONS · NOT TEMPLATES/);
+  assert.match(portal, /WHAT WOULD COUNT AS EVIDENCE/);
+  assert.match(portal, /No ready-made prompt/);
   assert.match(portal, /Daily GTM Brief/);
   assert.match(portal, /Import POs into QuickBooks/);
   assert.match(portal, /Human checkpoints/);
