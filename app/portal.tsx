@@ -36,6 +36,16 @@ const demoPrivacySections = [
 
 type BlueprintAnswer = { selections: string[]; detail: string; customOther?: string[] };
 type BlueprintAnswers = Record<string, BlueprintAnswer>;
+type ScaffoldAction = "clarify" | "directions" | "challenge";
+type ScaffoldSupportLevel = "guided" | "reduced" | "independent" | "review";
+type AssistantScaffold = {
+  action: ScaffoldAction;
+  questionId: string;
+  supportLevel: ScaffoldSupportLevel;
+  feviStage: "Formulate" | "Engage" | "Verify" | "Integrate";
+  currentAnswer: string;
+  selectedUseCaseId?: string;
+};
 type BlueprintQuestion = {
   id: string;
   label: string;
@@ -60,6 +70,20 @@ const agentBlueprintQuestions: BlueprintQuestion[] = [
   { id: "evidence", label: "Success & failure test", prompt: "What evidence would show that the agent is useful?", helper: "Name an observable result—and one failure that would make you revise the design.", choices: ["Time saved", "Fewer missed items", "More accurate output", "Better decision quality", "Completed transaction", "User satisfaction"], multiple: true, detailRequired: true, detailLabel: "How will you test success and recognize failure?", placeholder: "It succeeds when… It fails if…", example: "It succeeds if I can identify the same top actions in under five minutes; it fails if it invents account changes or misses a scheduled meeting." },
   { id: "memory", label: "Memory & reporting", prompt: "What should persist, and how should the agent report back?", helper: "Optional · Store only context that makes future work better. Do not retain secrets just because storage is available.", choices: ["Remember preferences", "Remember prior decisions", "Remember people or projects", "No long-term memory", "Send a concise summary", "Notify only on exceptions"], multiple: true, optional: true, detailLabel: "Add a memory boundary or preferred output.", placeholder: "Remember…, forget…, and report by…", example: "Remember my priority accounts and accepted recommendations, but not raw email bodies. Send a five-item morning brief." },
 ];
+
+function scaffoldSupportForStep(step: number): ScaffoldSupportLevel {
+  if (step < 2) return "guided";
+  if (step < 5) return "reduced";
+  if (step < agentBlueprintQuestions.length) return "independent";
+  return "review";
+}
+
+function feviStageForStep(step: number): AssistantScaffold["feviStage"] {
+  if (step < 2) return "Formulate";
+  if (step < 5) return "Engage";
+  if (step < 7) return "Verify";
+  return "Integrate";
+}
 
 type UseCaseIllustration = {
   id: string;
@@ -463,8 +487,9 @@ export function HackathonPortal() {
   const [assistantContext, setAssistantContext] = useState("");
   const [selectionAction, setSelectionAction] = useState<SelectionAction>(null);
   const [selectionCoachVisible, setSelectionCoachVisible] = useState(false);
-  const [selectedUseCaseId, setSelectedUseCaseId] = useState(inspirationCases[0].id);
+  const [selectedUseCaseId, setSelectedUseCaseId] = useState("");
   const [assistantDraft, setAssistantDraft] = useState<{ text: string; nonce: number } | undefined>();
+  const [assistantScaffold, setAssistantScaffold] = useState<AssistantScaffold | undefined>();
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [publishedAnnouncements, setPublishedAnnouncements] = useState<PublishedAnnouncement[]>([]);
   const [announcementHistoryOpen, setAnnouncementHistoryOpen] = useState(false);
@@ -569,7 +594,11 @@ export function HackathonPortal() {
 
   const participantSurface = portalUser?.role !== "organizer" || organizerParticipantMode;
 
-  function openAssistant() { setAssistantOpened(true); setAssistant(true); }
+  function openAssistant(scaffold?: AssistantScaffold) {
+    setAssistantScaffold(scaffold);
+    setAssistantOpened(true);
+    setAssistant(true);
+  }
 
   function offerSelectedContext(target: EventTarget | null) {
     if (view === "admin" || view === "eventAdmin") return;
@@ -701,7 +730,7 @@ export function HackathonPortal() {
       <main className="main">
         <header className="topbar">
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
-          <div className="top-actions"><span className={`role-chip ${organizerParticipantMode ? "demo" : ""}`}>{organizerParticipantMode ? "PARTICIPANT DEMO" : portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{organizerParticipantMode && <button className="perspective-return-top" onClick={returnToOrganizer}>Return to Organizer</button>}{participantSurface && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
+          <div className="top-actions"><span className={`role-chip ${organizerParticipantMode ? "demo" : ""}`}>{organizerParticipantMode ? "PARTICIPANT DEMO" : portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{organizerParticipantMode && <button className="perspective-return-top" onClick={returnToOrganizer}>Return to Organizer</button>}{participantSurface && <button className="ask-button" onClick={() => openAssistant()}>✦ Ask AI</button>}</div>
         </header>
         {Boolean(eventConfig?.announcementActive) && eventConfig?.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
         {organizerParticipantMode && <div className="participant-demo-banner"><div><strong>Organizer participant demo</strong><span>You are using your real organizer account inside the participant experience. Create or join a shared demo team to rehearse the live workflow.</span></div><button onClick={returnToOrganizer}>Exit demo mode</button></div>}
@@ -710,7 +739,7 @@ export function HackathonPortal() {
           {selectionCoachVisible && participantSurface && view === "home" && <aside className="selection-coach" aria-label="Text selection tutorial"><div className="selection-coach-orbit" aria-hidden="true"><i /><i /><span>✦</span></div><div><span className="eyebrow">TRY ASK AI IN CONTEXT</span><strong>Select the sentence below, then choose what to do.</strong><p className="selection-practice-line">What should my agent remember, what should it verify, and where should I stay in control?</p></div><button type="button" aria-label="Dismiss text selection tutorial" onClick={completeSelectionCoach}>×</button></aside>}
           {view === "home" && <Overview setView={setView} />}
           {view === "onboarding" && (
-            <AgentCanvas onOpenClawMax={() => void openClawMaxFromNavigation()} onOpenUseCase={(id) => { setSelectedUseCaseId(id); setView("useCases"); }} />
+            <AgentCanvas selectedUseCaseId={selectedUseCaseId} onOpenClawMax={() => void openClawMaxFromNavigation()} onOpenUseCase={(id) => { setSelectedUseCaseId(id); setView("useCases"); }} onAskScaffold={(draft, context, scaffold) => { setAssistantContext(context); setAssistantDraft({ text: draft, nonce: Date.now() }); openAssistant(scaffold); }} />
           )}
           {view === "useCases" && <UseCaseLibrary initialId={selectedUseCaseId} onBack={() => setView("onboarding")} onUse={(id) => { setSelectedUseCaseId(id); setView("onboarding"); }} />}
           {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
@@ -730,7 +759,7 @@ export function HackathonPortal() {
       </main>
 
       {selectionAction && participantSurface && <div className="selection-context-menu" style={{ left: selectionAction.left, top: selectionAction.top }} onMouseDown={(event) => event.preventDefault()} role="dialog" aria-label="Actions for selected text">{selectionAction.status === "saved" ? <><span className="selection-saved">✓ Saved to Learner Center</span><button type="button" onClick={() => { setSelectionAction(null); setView("learn"); }}>Open →</button></> : <><button type="button" onClick={() => { setAssistantContext(selectionAction.text); setSelectionAction(null); completeSelectionCoach(); openAssistant(); }}><span>✦</span>Ask AI</button><button type="button" disabled={selectionAction.status === "saving"} onClick={() => void saveSelectedNote()}><span>▤</span>{selectionAction.status === "saving" ? "Saving…" : selectionAction.status === "error" ? "Try Notes again" : "Take Notes"}</button></>}</div>}
-      {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} draft={assistantDraft} /></div>}
+      {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} draft={assistantDraft} scaffold={assistantScaffold} /></div>}
       {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
       {announcementHistoryOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAnnouncementHistoryOpen(false)}><section className="participant-announcement-history" role="dialog" aria-modal="true" aria-labelledby="announcement-history-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">EVENT UPDATES</span><h2 id="announcement-history-title">Published announcements</h2></div><button type="button" onClick={() => setAnnouncementHistoryOpen(false)} aria-label="Close announcement history">×</button></header><div>{publishedAnnouncements.length ? publishedAnnouncements.map((item) => <article key={item.id}><small>{new Date(item.createdAt).toLocaleString()}</small><p>{item.announcementText}</p></article>) : <p className="notes-empty">No earlier published announcements yet.</p>}</div></section></div>}
     </div>
@@ -781,7 +810,12 @@ function Overview({ setView }: { setView: (view: View) => void }) {
   </>;
 }
 
-function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => void; onOpenUseCase: (id: string) => void }) {
+function AgentCanvas({ selectedUseCaseId, onOpenClawMax, onOpenUseCase, onAskScaffold }: {
+  selectedUseCaseId: string;
+  onOpenClawMax: () => void;
+  onOpenUseCase: (id: string) => void;
+  onAskScaffold: (draft: string, context: string, scaffold: AssistantScaffold) => void;
+}) {
   const emptyAnswers = () => Object.fromEntries(agentBlueprintQuestions.map((question) => [question.id, { selections: [], detail: "", customOther: [] }])) as BlueprintAnswers;
   const [answers, setAnswers] = useState<BlueprintAnswers>(emptyAnswers);
   const [currentStep, setCurrentStep] = useState(0);
@@ -790,6 +824,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
   const [hydrated, setHydrated] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
+  const [referenceUseCaseId, setReferenceUseCaseId] = useState(selectedUseCaseId);
   const lastSavedPayload = useRef("");
   const complete = currentStep >= agentBlueprintQuestions.length;
   const question = complete ? null : agentBlueprintQuestions[currentStep];
@@ -799,7 +834,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     const load = async () => {
       try {
         const response = await fetch("/api/canvas", { cache: "no-store" });
-        const result = await response.json() as { blueprint?: { answers?: BlueprintAnswers; currentStep?: number; status?: "draft" | "completed"; projectId?: string | null }; error?: string };
+        const result = await response.json() as { blueprint?: { answers?: BlueprintAnswers; currentStep?: number; status?: "draft" | "completed"; projectId?: string | null; selectedUseCaseId?: string | null }; error?: string };
         if (!response.ok) throw new Error(result.error || "Your saved blueprint could not be loaded.");
         if (cancelled) return;
         const restored = { ...emptyAnswers(), ...(result.blueprint?.answers || {}) };
@@ -807,6 +842,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
         setCurrentStep(Math.max(0, Math.min(agentBlueprintQuestions.length, Number(result.blueprint?.currentStep) || 0)));
         setStatus(result.blueprint?.status || "draft");
         setProjectId(result.blueprint?.projectId || null);
+        setReferenceUseCaseId(selectedUseCaseId || result.blueprint?.selectedUseCaseId || "");
         lastSavedPayload.current = JSON.stringify(restored);
       } catch (problem) {
         if (!cancelled) setError(problem instanceof Error ? problem.message : "Your saved blueprint could not be loaded.");
@@ -823,7 +859,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     setSaveState("saving");
     const timer = window.setTimeout(async () => {
       try {
-        const response = await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep, eventType: "draft_autosave", questionId: question?.id || "review" }) });
+        const response = await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep, selectedUseCaseId: referenceUseCaseId, eventType: "draft_autosave", questionId: question?.id || "review" }) });
         const result = await response.json() as { error?: string };
         if (!response.ok) throw new Error(result.error || "Draft could not be saved.");
         lastSavedPayload.current = payload;
@@ -834,7 +870,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
       }
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [answers, currentStep, hydrated, question?.id]);
+  }, [answers, currentStep, hydrated, question?.id, referenceUseCaseId]);
 
   const answerFor = (id: string) => answers[id] || { selections: [], detail: "", customOther: [] };
   const hasAnswer = (item: BlueprintQuestion) => {
@@ -872,12 +908,30 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     setStatus("draft");
     setAnswers((items) => ({ ...items, [question.id]: { ...current, customOther } }));
   };
-  async function recordEvent(eventType: string, questionId: string, nextStep = currentStep) {
+  async function recordEvent(eventType: string, questionId: string, nextStep = currentStep, extra: Record<string, string> = {}) {
     try {
-      await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: nextStep, eventType, questionId }) });
+      await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: nextStep, selectedUseCaseId: referenceUseCaseId, eventType, questionId, ...extra }) });
       lastSavedPayload.current = JSON.stringify(answers);
       setSaveState("saved");
     } catch { setSaveState("error"); }
+  }
+  async function requestScaffold(action: ScaffoldAction) {
+    if (!question) return;
+    const supportLevel = scaffoldSupportForStep(currentStep);
+    const feviStage = feviStageForStep(currentStep);
+    const currentAnswer = summaryFor(question);
+    if (supportLevel === "independent" && !currentAnswer) {
+      setError("Write your first draft before asking AI to critique this later-stage decision.");
+      return;
+    }
+    const scaffold: AssistantScaffold = { action, questionId: question.id, supportLevel, feviStage, currentAnswer, selectedUseCaseId: referenceUseCaseId || undefined };
+    await recordEvent("scaffold_opened", question.id, currentStep, { scaffoldAction: action, supportLevel, feviStage });
+    const actionPrompt = action === "clarify"
+      ? "Clarify what this design question is asking me. Ask one useful follow-up question, but do not write my answer."
+      : action === "directions"
+        ? "Give me two different directions I could consider for this design decision. Explain the trade-off briefly, but leave the choice and wording to me."
+        : "Challenge my current answer. Point out one missing boundary, assumption, or test I should reconsider, without rewriting it for me.";
+    onAskScaffold(actionPrompt, `Agent Blueprint · ${question.label} · FEVI ${feviStage} · ${supportLevel} support`, scaffold);
   }
   async function continueForward() {
     if (!question || !hasAnswer(question)) {
@@ -893,7 +947,7 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
     setSaveState("saving");
     setError("");
     try {
-      const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: agentBlueprintQuestions.length }) });
+      const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: agentBlueprintQuestions.length, selectedUseCaseId: referenceUseCaseId }) });
       const result = await response.json() as { id?: string; error?: string };
       if (!response.ok || !result.id) throw new Error(result.error || "Blueprint could not be completed.");
       setProjectId(result.id);
@@ -918,13 +972,18 @@ function AgentCanvas({ onOpenClawMax, onOpenUseCase }: { onOpenClawMax: () => vo
           <div className="blueprint-progress-track"><i style={{ width: `${((currentStep + 1) / agentBlueprintQuestions.length) * 100}%` }} /></div>
           <span className="question-section-label">{question.label}{question.optional ? " · OPTIONAL" : ""}</span>
           <h3>{question.prompt}</h3><p>{question.helper}</p>
+          <aside className={`blueprint-ai-scaffold ${scaffoldSupportForStep(currentStep)}`}>
+            <header><div><span className="eyebrow">OPTIONAL AI SCAFFOLD · FEVI {feviStageForStep(currentStep).toUpperCase()}</span><strong>{scaffoldSupportForStep(currentStep) === "guided" ? "Guided support" : scaffoldSupportForStep(currentStep) === "reduced" ? "Light hints" : "Draft first · critique only"}</strong></div><small>{scaffoldSupportForStep(currentStep) === "guided" ? "Early stage" : scaffoldSupportForStep(currentStep) === "reduced" ? "Support is fading" : "Independent decision"}</small></header>
+            <p>{scaffoldSupportForStep(currentStep) === "guided" ? "Ask for orientation or a small set of directions. AI will not complete the Blueprint for you." : scaffoldSupportForStep(currentStep) === "reduced" ? "AI will respond with shorter prompts and trade-offs rather than a worked example." : "Write your own answer first. AI can then challenge one assumption, boundary, or test."}</p>
+            <div><button type="button" disabled={scaffoldSupportForStep(currentStep) === "independent" && !summaryFor(question)} onClick={() => void requestScaffold("clarify")}>Clarify this question</button><button type="button" disabled={scaffoldSupportForStep(currentStep) === "independent" && !summaryFor(question)} onClick={() => void requestScaffold("directions")}>Give me two directions</button><button type="button" disabled={!summaryFor(question)} onClick={() => void requestScaffold("challenge")}>Challenge my answer</button></div>
+          </aside>
           <div className={`blueprint-choice-grid ${question.multiple ? "multiple" : "single"}`}>{question.choices.map((choice) => { const selected = answerFor(question.id).selections.includes(choice); return <button type="button" key={choice} className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => toggleChoice(choice)}><span>{selected ? "✓" : "+"}</span>{choice}</button>; })}</div>
           {question.id === "context" && answerFor(question.id).selections.includes("Other") && <fieldset className="blueprint-other-fields"><legend>OTHER SETTINGS · UP TO 3</legend>{(answerFor(question.id).customOther?.length ? answerFor(question.id).customOther! : [""]).map((entry, index) => <label key={index}><span>Other {index + 1}</span><input autoFocus={index === 0 && !entry} value={entry} onChange={(event) => updateOther(index, event.target.value)} placeholder="Describe another setting…" /></label>)}</fieldset>}
           <label className="blueprint-detail-label">{question.detailLabel}<textarea autoFocus={!(question.id === "context" && answerFor(question.id).selections.includes("Other"))} rows={5} value={answerFor(question.id).detail} onChange={(event) => updateDetail(event.target.value)} placeholder={question.placeholder} /></label>
           <details className="blueprint-example" onToggle={(event) => { if (event.currentTarget.open) void recordEvent("example_opened", question.id); }}><summary>I need an example</summary><p>{question.example}</p><small>Use the structure, not the wording. Your own situation is the useful evidence.</small></details>
           {error && <p className="form-error">{error}</p>}
           <footer className="agent-design-actions"><button className="text-button" disabled={currentStep === 0} onClick={() => { setError(""); setCurrentStep((step) => Math.max(0, step - 1)); }}>← Previous</button><span>You can edit every answer from the Blueprint.</span><button className="primary" onClick={() => void continueForward()}>{currentStep === agentBlueprintQuestions.length - 1 ? "Review blueprint →" : "Next question →"}</button></footer>
-        </> : <div className="blueprint-review"><span className="eyebrow">READY FOR YOUR REVIEW</span><h3>Your first Agent Blueprint is assembled.</h3><p>This is still your draft. Read the evidence on the right, edit anything that feels generic, then save it as your project starting point.</p><div className="blueprint-review-checks"><span>✓ A concrete problem</span><span>✓ A bounded workflow</span><span>✓ Human review points</span><span>✓ A visible success test</span></div>{error && <p className="form-error">{error}</p>}<div className="blueprint-review-actions"><button className="text-button" onClick={() => setCurrentStep(agentBlueprintQuestions.length - 1)}>← Edit last answer</button><button className="primary" disabled={saveState === "saving"} onClick={() => void completeBlueprint()}>{saveState === "saving" ? "Saving blueprint…" : status === "completed" ? "Save updated blueprint" : "Save Agent Blueprint"}</button></div>{status === "completed" && <div className="blueprint-complete"><div><b>Blueprint saved</b><span>Project {projectId?.slice(0, 8)}… is ready to build.</span></div><button type="button" onClick={onOpenClawMax}>Open ClawMax to build ↗</button></div>}</div>}
+        </> : <div className="blueprint-review"><span className="eyebrow">READY FOR YOUR REVIEW</span><h3>Your first Agent Blueprint is assembled.</h3><p>This is still your draft. Read the evidence on the right, edit anything that feels generic, then save it as your project starting point.</p><div className="blueprint-review-checks"><span>✓ A concrete problem</span><span>✓ A bounded workflow</span><span>✓ Human review points</span><span>✓ A visible success test</span></div><aside className="blueprint-final-scaffold"><div><span className="eyebrow">FINAL FADED CHECK · FEVI INTEGRATE</span><strong>Ask for gaps—not a rewrite.</strong><p>AI can identify up to three missing boundaries, assumptions, or tests. You still decide what to change.</p></div><button type="button" onClick={() => { const scaffold: AssistantScaffold = { action: "challenge", questionId: "review", supportLevel: "review", feviStage: "Integrate", currentAnswer: agentBlueprintQuestions.map((item) => `${item.label}: ${summaryFor(item) || "Not specified"}`).join("\n"), selectedUseCaseId: referenceUseCaseId || undefined }; void recordEvent("scaffold_opened", "review", currentStep, { scaffoldAction: "challenge", supportLevel: "review", feviStage: "Integrate" }); onAskScaffold("Review my Agent Blueprint. Identify up to three important gaps or untested assumptions. Do not rewrite it; ask me to decide what to change.", "Agent Blueprint · final FEVI review · faded support", scaffold); }}>✦ Review gaps with AI</button></aside>{error && <p className="form-error">{error}</p>}<div className="blueprint-review-actions"><button className="text-button" onClick={() => setCurrentStep(agentBlueprintQuestions.length - 1)}>← Edit last answer</button><button className="primary" disabled={saveState === "saving"} onClick={() => void completeBlueprint()}>{saveState === "saving" ? "Saving blueprint…" : status === "completed" ? "Save updated blueprint" : "Save Agent Blueprint"}</button></div>{status === "completed" && <div className="blueprint-complete"><div><b>Blueprint saved</b><span>Project {projectId?.slice(0, 8)}… is ready to build.</span></div><button type="button" onClick={onOpenClawMax}>Open ClawMax to build ↗</button></div>}</div>}
       </section>
       <aside className="agent-blueprint-live"><header><div><span className="eyebrow">PARTICIPANT AGENT BLUEPRINT</span><h3>Your design, in your words.</h3></div><small>{agentBlueprintQuestions.filter((item) => summaryFor(item)).length}/{agentBlueprintQuestions.length} sections</small></header><div>{agentBlueprintQuestions.map((item, index) => { const summary = summaryFor(item); return <article key={item.id} className={summary ? "filled" : currentStep === index ? "active" : ""}><div><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{item.label}</strong><p>{summary || (item.optional ? "Optional — not defined" : "Waiting for your answer")}</p></span></div><button type="button" onClick={() => { setError(""); setCurrentStep(index); void recordEvent("answer_revisited", item.id, index); }}>{summary ? "Edit" : "Add"}</button></article>; })}</div><footer><strong>This is not a generated prompt.</strong><span>It is a participant-authored record of the problem, boundaries, workflow, and test.</span></footer></aside>
     </div>
@@ -2036,7 +2095,7 @@ function LegacyPromptCoach() {
 
 type AssistantHistoryMessage = { id: string; parentPromptEventId?: string; conversationId?: string; page: string; tutorialStep?: string; taskReference?: string; userPrompt: string; responseText?: string; modelName?: string; inputTokens?: number; outputTokens?: number; status: string; errorCode?: string; outcomeStatus?: string; outcomeEvidence?: string; createdAt: number };
 
-function Assistant({ close, page, selectedContext, draft }: { close: () => void; page: string; selectedContext: string; draft?: { text: string; nonce: number } }) {
+function Assistant({ close, page, selectedContext, draft, scaffold }: { close: () => void; page: string; selectedContext: string; draft?: { text: string; nonce: number }; scaffold?: AssistantScaffold }) {
   const conversationId = useRef("");
   const [text, setText] = useState("");
   // A new selection is an explicit user action; synchronizing it here keeps the
@@ -2099,8 +2158,8 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
     try {
       let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
       if (!anonymousParticipantId) { anonymousParticipantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId); }
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: promptToSend, page, selectedContext, anonymousParticipantId, parentPromptEventId, conversationId: conversationId.current }) });
-      const result = await response.json() as { answer?: string; error?: string; model?: string; inputTokens?: number; outputTokens?: number; eventId?: string; cogneeMemoryUsed?: boolean };
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: promptToSend, page, selectedContext, anonymousParticipantId, parentPromptEventId, conversationId: conversationId.current, tutorialStep: scaffold ? `Agent Blueprint · ${scaffold.questionId} · ${scaffold.supportLevel}` : undefined, scaffold }) });
+      const result = await response.json() as { answer?: string; error?: string; model?: string; inputTokens?: number; outputTokens?: number; eventId?: string; cogneeMemoryUsed?: boolean; sharedParticipantContextUsed?: boolean };
       if (!response.ok || !result.answer) throw new Error(result.error || "The assistant could not answer right now.");
       setAnswer(result.answer);
       setPromptEventId(result.eventId || "");
@@ -2151,5 +2210,5 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
   const feedbackControl = <div className="assistant-feedback-control"><div className="feedback-choice-row">{([
     ["helpful", "Helpful"], ["partly_helpful", "Partly helpful"], ["not_helpful", "Not helpful"],
   ] as const).map(([value, label]) => <button key={value} className={feedbackChoice === value || feedbackStatus === value ? `feedback-selected${value === "not_helpful" ? " negative" : value === "partly_helpful" ? " partial" : ""}` : ""} disabled={feedbackStatus === "saving" || ["helpful", "partly_helpful", "not_helpful"].includes(feedbackStatus)} onClick={() => { if (value === "helpful") void saveFeedback(value); else { setFeedbackChoice(value); setFeedbackStatus("idle"); } }}>{feedbackStatus === value ? `✓ ${label}` : label}</button>)}</div>{(feedbackChoice === "partly_helpful" || feedbackChoice === "not_helpful") && feedbackStatus !== feedbackChoice && <div className="feedback-followup"><strong>What was the main issue?</strong><div className="feedback-reason-chips">{feedbackReasons.map(([value, label]) => <button type="button" key={value} className={feedbackReason === value ? "selected" : ""} onClick={() => setFeedbackReason(value)}>{label}</button>)}</div><textarea rows={2} maxLength={500} value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="Add a short note (optional)" /><div><button className="feedback-save" disabled={!feedbackReason || feedbackStatus === "saving"} onClick={() => void saveFeedback(feedbackChoice, feedbackReason, feedbackNote)}>Save feedback</button><button onClick={() => { setFeedbackChoice(null); setFeedbackReason(""); setFeedbackNote(""); }}>Cancel</button></div></div>}{feedbackStatus === "saving" && <small className="feedback-confirmation">Saving feedback…</small>}{feedbackStatus === "error" && <small className="feedback-confirmation error">Feedback was not saved. Please try again.</small>}{(["helpful", "partly_helpful", "not_helpful"] as const).includes(feedbackStatus as "helpful" | "partly_helpful" | "not_helpful") && <small className="feedback-confirmation">Feedback saved and linked to this response.</small>}</div>;
-  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><details className="assistant-preferences"><summary><span>Response style</span><b>{responseLength} · {interactionMode}</b></summary><InteractionPreferencePicker compact responseLength={responseLength} interactionMode={interactionMode} onLength={(value) => void savePreferences(value, preferenceRef.current.interactionMode)} onMode={(value) => void savePreferences(preferenceRef.current.responseLength, value)} /><small className={preferenceStatus === "error" ? "error" : ""}>{preferenceStatus === "saving" ? "Saving…" : preferenceStatus === "saved" ? "Saved" : preferenceStatus === "error" ? "Could not save" : "Change this at any time"}</small></details><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Recalling relevant Cognee memory, then answering.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "NO MATCHING MEMORY"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}{feedbackControl}<div><button onClick={() => void saveToLearnerCenter()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Saved to Learner Center" : brainStatus === "error" ? "Try saving again" : "＋ Save to Learner Center"}</button></div></div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll start small, use your preferred response style, and give you a clear next step. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored in Learner Center. Never paste credentials.</small></footer></aside></div>;
+  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>Shared participant context · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><details className="assistant-preferences"><summary><span>Response style</span><b>{responseLength} · {interactionMode}</b></summary><InteractionPreferencePicker compact responseLength={responseLength} interactionMode={interactionMode} onLength={(value) => void savePreferences(value, preferenceRef.current.interactionMode)} onMode={(value) => void savePreferences(preferenceRef.current.responseLength, value)} /><small className={preferenceStatus === "error" ? "error" : ""}>{preferenceStatus === "saving" ? "Saving…" : preferenceStatus === "saved" ? "Saved" : preferenceStatus === "error" ? "Could not save" : "Change this at any time"}</small></details>{scaffold && <div className={`assistant-scaffold-context ${scaffold.supportLevel}`}><span>{scaffold.supportLevel.toUpperCase()} SCAFFOLD · FEVI {scaffold.feviStage.toUpperCase()}</span><strong>{scaffold.action === "clarify" ? "Clarify the decision" : scaffold.action === "directions" ? "Compare possible directions" : "Challenge the participant’s draft"}</strong><small>The assistant can use your interview and Blueprint, but it must leave the final design decision to you.</small></div>}<div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context. Your saved interview, Blueprint, design stage, notes, and recent check-in remain available on every page.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Reading your saved context, then recalling relevant Cognee memory.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "SHARED PARTICIPANT CONTEXT USED"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}{feedbackControl}<div><button onClick={() => void saveToLearnerCenter()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Saved to Learner Center" : brainStatus === "error" ? "Try saving again" : "＋ Save to Learner Center"}</button></div></div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll use your saved profile and Agent Blueprint, start small, and leave the final decision to you. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored in Learner Center. Never paste credentials.</small></footer></aside></div>;
 }

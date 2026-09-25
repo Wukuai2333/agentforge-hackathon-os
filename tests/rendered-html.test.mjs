@@ -393,11 +393,22 @@ test("builds a resumable participant-authored Agent Blueprint with optional insp
   assert.match(portal, /Select one or more settings/);
   assert.match(portal, /OTHER SETTINGS · UP TO 3/);
   assert.match(portal, /customOther\.length < 3/);
+  assert.match(portal, /OPTIONAL AI SCAFFOLD/);
+  assert.match(portal, /Clarify this question/);
+  assert.match(portal, /Give me two directions/);
+  assert.match(portal, /Challenge my answer/);
+  assert.match(portal, /Support is fading/);
+  assert.match(portal, /Draft first · critique only/);
+  assert.match(portal, /Review gaps with AI/);
   assert.doesNotMatch(portal, /Other or mixed/);
   assert.doesNotMatch(portal, /DRAFT BUILD BRIEF/);
   assert.match(canvas, /draft_autosave/);
   assert.match(canvas, /example_opened/);
   assert.match(canvas, /answer_revisited/);
+  assert.match(canvas, /ai_scaffold_opened/);
+  assert.match(canvas, /scaffoldAction/);
+  assert.match(canvas, /supportLevel/);
+  assert.match(canvas, /customOther/);
   assert.match(canvas, /blueprint_revised/);
   assert.match(canvas, /superseded_by_id/);
   assert.match(schema, /agentDesignBlueprints/);
@@ -407,6 +418,25 @@ test("builds a resumable participant-authored Agent Blueprint with optional insp
   assert.match(me, /agentDesignEvents/);
   assert.match(styles, /\.agent-design-workspace/);
   assert.match(styles, /\.agent-blueprint-live/);
+  assert.match(styles, /\.blueprint-ai-scaffold/);
+});
+
+test("gives Ask AI one participant context while fading Blueprint support", async () => {
+  const [portal, assistant] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/assistant/route.ts"),
+  ]);
+  assert.match(portal, /scaffoldSupportForStep/);
+  assert.match(portal, /guided/);
+  assert.match(portal, /reduced/);
+  assert.match(portal, /independent/);
+  assert.match(portal, /Shared participant context/);
+  assert.match(assistant, /participant_onboarding_profiles/);
+  assert.match(assistant, /agent_design_blueprints/);
+  assert.match(assistant, /learner_notes/);
+  assert.match(assistant, /learning_checkins/);
+  assert.match(assistant, /sharedParticipantContext/);
+  assert.match(assistant, /Critique the participant's existing draft only/);
+  assert.match(assistant, /sharedParticipantContextUsed: true/);
 });
 
 test("keeps a private Learner Center for notes and Ask AI history", async () => {
