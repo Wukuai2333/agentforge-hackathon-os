@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
 
 type NoteInput = {
   teamId?: string;
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       source_prompt_event_id: note.sourcePromptEventId, occurred_at: new Date(note.createdAt).toISOString(),
       evidence_type: "team_authored_fact",
     }), note.createdAt)]);
-  waitUntil(syncPendingMemory(env, 20));
+  waitUntil(wakeCogneeSync(env));
   return Response.json({ note }, { status: 201 });
 }
 
@@ -103,6 +103,6 @@ export async function PATCH(request: Request) {
         occurred_at: new Date(updatedAt).toISOString(), evidence_type: "team_authored_fact",
       }), updatedAt),
   ]);
-  waitUntil(syncPendingMemory(env, 20));
+  waitUntil(wakeCogneeSync(env));
   return Response.json({ note: { id: noteId, teamId, content, attributionJson, updatedById: editorId, updatedByName: editorName, updatedAt, revision: existing.revision + 1 } });
 }

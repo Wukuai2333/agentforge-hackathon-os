@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
 
 type ModelRuntime = {
   DB: D1Database;
@@ -142,7 +142,7 @@ ${JSON.stringify(evidence)}`,
       ]);
       created++;
     }
-    waitUntil(syncPendingMemory(runtime, 20));
+    waitUntil(wakeCogneeSync(runtime));
     return Response.json({ created, evidenceCount: evidence.length, message: created ? `${created} evidence-linked inference${created === 1 ? "" : "s"} created.` : "No new inference was created because the current results already exist." });
   }
   const entryId = input.entryId?.trim() || "";
@@ -173,6 +173,6 @@ ${JSON.stringify(evidence)}`,
   } else if (input.action === "dispute") {
     await runtime.DB.prepare("INSERT INTO participant_model_reviews (id,event_participant_id,entry_id,action,note,created_at) VALUES (?,?,?,'disputed',?,?)").bind(reviewId, account.participantId, entryId, input.note?.trim().slice(0, 1000) || "Participant disputed this interpretation.", now).run();
   } else return Response.json({ error: "Choose confirm, correct, or dispute." }, { status: 400 });
-  waitUntil(syncPendingMemory(runtime, 20));
+  waitUntil(wakeCogneeSync(runtime));
   return Response.json({ saved: true, action: input.action, reviewId });
 }

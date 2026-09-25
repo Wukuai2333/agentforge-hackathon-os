@@ -1,5 +1,5 @@
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
 
 type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
 const RUBRIC_VERSION = "agentforge-process-coaching-v4";
@@ -75,6 +75,6 @@ export async function POST(request: Request) {
       participant_note: note || null, occurred_at: new Date(now).toISOString(), evidence_type: "participant_reported_fact",
     }), now));
   await runtime.DB.batch(statements);
-  waitUntil(syncPendingMemory(runtime, 10));
+  waitUntil(wakeCogneeSync(runtime));
   return Response.json({ saved: true, action, actionId, reevaluationRequired: action === "recorded_outcome" });
 }

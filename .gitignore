@@ -45,3 +45,6 @@ next-env.d.ts
 /outputs/
 /work/
 /agentforge-deploy.tar.gz
+/wrangler.production.jsonc
+/backups/
+/.dev.vars*

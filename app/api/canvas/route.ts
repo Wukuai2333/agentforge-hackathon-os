@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
 
 type BlueprintAnswer = { selections?: unknown; detail?: unknown; customOther?: unknown };
 type BlueprintAnswers = Record<string, BlueprintAnswer>;
@@ -94,7 +94,7 @@ export async function PATCH(request: Request) {
     .bind(auth.account!.participantId, auth.account!.eventId, auth.account!.teamId, BLUEPRINT_VERSION, serializeAnswers(answers, input.selectedUseCaseId), currentStep, nextStatus, existing?.projectId || null, existing?.createdAt || now, now).run();
   const questionId = cleanText(input.questionId, 80);
   const eventQuestionId = questionIds.find((id) => id === questionId);
-  await recordDesignEvent(auth.account!, eventType, questionId, {
+  if (eventType !== "draft_autosave") await recordDesignEvent(auth.account!, eventType, questionId, {
     currentStep,
     answeredQuestionIds: questionIds.filter((id) => answerStatement(answers[id])),
     answer: eventQuestionId ? answers[eventQuestionId] : null,
@@ -164,6 +164,6 @@ export async function POST(request: Request) {
   ];
   await env.DB.batch(statements);
   await recordDesignEvent(auth.account!, eventType, "review", { projectId, answers, completedQuestionIds: questionIds.filter((id) => answerStatement(answers[id])) }, now);
-  waitUntil(syncPendingMemory(env, 25));
+  waitUntil(wakeCogneeSync(env));
   return Response.json({ id: projectId, title, status: "building", savedAt: now });
 }

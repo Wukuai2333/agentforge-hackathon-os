@@ -1,6 +1,7 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
+import { existingReservation, expireStaleReservations, failAssistantReservation, markReservationProcessing, reserveAssistantTokens, settleAssistantReservation } from "../../../lib/assistant-budget";
 
 type AssistantInput = {
   prompt?: string;
@@ -30,7 +31,7 @@ type OpenAIResponse = {
 };
 
 const SYSTEM_PROMPT_VERSION = "agentforge-contextual-tutor-v2";
-type AssistantRuntime = { DB: D1Database; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; OPENAI_MODEL?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string };
+type AssistantRuntime = { DB: D1Database; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; OPENAI_MODEL?: string; COGNEE_API_KEY?: string; COGNEE_API_URL?: string; COGNEE_LEARNING_DATASET?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
 
 function providerKeyPool(runtime: AssistantRuntime) {
   try {
@@ -107,6 +108,14 @@ export async function POST(request: Request) {
   ).bind(requestedParentId, participantId).first<{ id: string }>())?.id || null : null;
 
   if (!prompt) return Response.json({ error: "Please enter a question." }, { status: 400 });
+  await expireStaleReservations(runtime, startedAt);
+  const previousRequest = await existingReservation(runtime, requestId);
+  if (previousRequest?.status === "completed" && previousRequest.responseText) {
+    return Response.json({ answer: previousRequest.responseText, model: previousRequest.modelName, inputTokens: previousRequest.inputTokens, outputTokens: previousRequest.outputTokens, eventId: previousRequest.promptEventId, duplicate: true });
+  }
+  if (previousRequest && ["reserved", "processing"].includes(previousRequest.status)) {
+    return Response.json({ error: "This AI request is already being processed. Please wait for it to finish." }, { status: 409 });
+  }
   const providerKeys = providerKeyPool(runtime);
   if (!providerKeys.length) return Response.json({ error: "AI access is not configured for this event. Please ask an organizer for help." }, { status: 503 });
   const assistantSetting = await runtime.DB.prepare(`SELECT assistant_enabled AS assistantEnabled,
@@ -131,22 +140,9 @@ export async function POST(request: Request) {
   if (Number(rateCounts?.minuteCount || 0) >= minuteLimit || Number(rateCounts?.hourCount || 0) >= hourLimit) {
     return Response.json({ error: `Ask AI limit reached: ${minuteLimit} requests per minute and ${hourLimit} per hour.` }, { status: 429, headers: { "Retry-After": "60" } });
   }
-  const [eventUsage, teamUsage, participantUsage] = await Promise.all([
-    runtime.DB.prepare("SELECT COALESCE(SUM(input_tokens + output_tokens),0) AS tokens FROM prompt_events WHERE status='success'").first<{ tokens: number }>(),
-    teamId ? runtime.DB.prepare("SELECT COALESCE(SUM(input_tokens + output_tokens),0) AS tokens FROM prompt_events WHERE status='success' AND anonymous_team_id=?").bind(teamId).first<{ tokens: number }>() : Promise.resolve({ tokens: 0 }),
-    runtime.DB.prepare("SELECT COALESCE(SUM(input_tokens + output_tokens),0) AS tokens FROM prompt_events WHERE status='success' AND anonymous_participant_id=?").bind(participantId).first<{ tokens: number }>(),
-  ]);
   const eventQuota = Math.max(1000, Number(assistantSetting?.eventTokenQuota || 5000000));
   const teamQuota = Math.max(1000, Number(assistantSetting?.defaultTeamTokenQuota || 100000));
   const participantQuota = Math.max(500, Number(assistantSetting?.defaultParticipantTokenQuota || 25000));
-  if (Number(eventUsage?.tokens || 0) >= eventQuota) return Response.json({ error: "The event AI budget has been reached. An organizer must increase it before new requests can run." }, { status: 429 });
-  if (teamId && Number(teamUsage?.tokens || 0) >= teamQuota) return Response.json({ error: "Your team has reached its AI budget. Please contact an organizer." }, { status: 429 });
-  if (Number(participantUsage?.tokens || 0) >= participantQuota) return Response.json({ error: "You have reached your participant AI budget. Please contact an organizer." }, { status: 429 });
-  const remainingBudget = Math.min(
-    eventQuota - Number(eventUsage?.tokens || 0),
-    teamId ? teamQuota - Number(teamUsage?.tokens || 0) : eventQuota,
-    participantQuota - Number(participantUsage?.tokens || 0),
-  );
   const [preference, blueprint, learnerNotes, latestCheckin] = await Promise.all([
     runtime.DB.prepare(`SELECT answers_json AS answersJson,response_length AS responseLength,interaction_mode AS interactionMode
       FROM participant_onboarding_profiles WHERE participant_id=?`).bind(participantId).first<{
@@ -197,8 +193,8 @@ export async function POST(request: Request) {
       ? `This is a reduced-support scaffold request (${requestedAction}). Give a short hint, question, or trade-off only. Do not provide a worked example or final wording.`
       : `This is a faded ${requestedSupport} scaffold request (${requestedAction}). Critique the participant's existing draft only. Identify at most three gaps or assumptions and do not rewrite the answer. If no draft exists, ask the participant to draft one first.`;
   const estimatedRequestTokens = Math.ceil((prompt.length + selectedContext.length + sharedParticipantContext.length) / 4) + 300;
-  if (remainingBudget < estimatedRequestTokens + 128) return Response.json({ error: "There is not enough remaining AI budget for this request. Please contact an organizer." }, { status: 429 });
-  const maxOutputTokens = Math.max(128, Math.min(4000, Number(assistantSetting?.maxOutputTokens || 1500), remainingBudget - estimatedRequestTokens));
+  const maxOutputTokens = Math.max(128, Math.min(4000, Number(assistantSetting?.maxOutputTokens || 1500)));
+  const reservedTokens = estimatedRequestTokens + maxOutputTokens;
   const providerKey = providerKeys[stableKeyIndex(teamId || participantId, providerKeys.length)];
   const responseLength = preference?.responseLength || "brief";
   const interactionMode = preference?.interactionMode || "guide";
@@ -212,6 +208,15 @@ export async function POST(request: Request) {
       ) < ? ON CONFLICT(request_id) DO NOTHING`)
     .bind(participantId, requestId, now, now + 2 * 60 * 1000, participantId, now, Math.max(1, Math.min(5, Number(assistantSetting?.maxConcurrentRequests || 2)))).run();
   if (!lease.meta.changes) return Response.json({ error: "You already have the maximum number of AI requests running. Please wait for one to finish." }, { status: 409 });
+  const reserved = await reserveAssistantTokens(runtime, {
+    requestId, promptEventId: eventId, eventId: auth.account!.eventId, participantId, teamId,
+    estimatedTokens: reservedTokens, eventQuota, teamQuota, participantQuota, now,
+  });
+  if (!reserved) {
+    await runtime.DB.prepare("DELETE FROM assistant_active_leases WHERE participant_id=? AND request_id=?").bind(participantId, requestId).run();
+    return Response.json({ error: "The available event, team, or participant AI budget is not large enough for this request. Please contact an organizer." }, { status: 429 });
+  }
+  await markReservationProcessing(runtime, requestId, now);
 
   let status: "success" | "error" = "error";
   let answer = "";
@@ -295,9 +300,11 @@ export async function POST(request: Request) {
       ON CONFLICT(source_type, source_id) DO NOTHING`).bind(
       crypto.randomUUID(), eventId, "agentforge_learning_signals", memoryPayload, occurredAt,
     )]);
+    if (status === "success") await settleAssistantReservation(runtime, requestId, Number(inputTokens || 0) + Number(outputTokens || 0), occurredAt);
+    else await failAssistantReservation(runtime, requestId, errorCode, occurredAt);
     await runtime.DB.prepare("DELETE FROM assistant_active_leases WHERE participant_id=? AND request_id=?")
       .bind(participantId, requestId).run();
-    waitUntil(syncPendingMemory(runtime, 20));
+    waitUntil(wakeCogneeSync(runtime));
   }
 }
 
@@ -336,7 +343,7 @@ export async function PATCH(request: Request) {
         occurred_at: new Date(createdAt).toISOString(), evidence_type: "participant_reported_fact",
       }), createdAt),
   ]);
-  waitUntil(syncPendingMemory(runtime as AssistantRuntime, 20));
+  waitUntil(wakeCogneeSync(runtime as AssistantRuntime));
   return Response.json({ saved: true, feedback, reasonCode, createdAt });
 }
 

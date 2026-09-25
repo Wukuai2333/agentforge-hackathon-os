@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string };
+type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
 
 function configuredProviderKeyCount(runtime: Runtime) {
   try {
@@ -118,14 +118,18 @@ export async function GET(request: Request) {
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
   const safeFeedbacks = feedbacks.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) }));
-  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "participant_orientation_acknowledgements", "assistant_feedback_events", "learning_checkins", "learner_notes", "agent_design_blueprints", "agent_design_events", "team_memberships", "team_invites"];
+  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "participant_orientation_acknowledgements", "assistant_feedback_events", "assistant_token_usage", "assistant_token_reservations", "learning_checkins", "learner_notes", "agent_design_blueprints", "agent_design_events", "team_memberships", "team_invites"];
   const schemaTables = await runtime.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<{ name: string }>();
   const presentTables = new Set(schemaTables.results.map((row) => row.name));
   const missingTables = requiredTables.filter((name) => !presentTables.has(name));
+  const reservationHealth = presentTables.has("assistant_token_reservations") ? await runtime.DB.prepare(`SELECT
+    SUM(CASE WHEN status IN ('reserved','processing') AND expires_at>=? THEN 1 ELSE 0 END) AS active,
+    SUM(CASE WHEN status IN ('reserved','processing') AND expires_at<? THEN 1 ELSE 0 END) AS stale
+    FROM assistant_token_reservations`).bind(Date.now(), Date.now()).first<{ active: number | null; stale: number | null }>() : { active: 0, stale: 0 };
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: { ...(settings || { assistantEnabled: 1, eventTokenQuota: 5000000, defaultTeamTokenQuota: 100000, defaultParticipantTokenQuota: 25000, perMinuteRequestLimit: 10, perHourRequestLimit: 100, maxConcurrentRequests: 2, maxOutputTokens: 1500 }), providerKeyCount: configuredProviderKeyCount(runtime), keyRouting: "stable_team_shard" },
     feedbacks: safeFeedbacks,
-    preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), expectedParticipantScale: "50–70" },
+    preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), queueConfigured: Boolean(runtime.COGNEE_SYNC_QUEUE), activeReservations: Number(reservationHealth?.active || 0), staleReservations: Number(reservationHealth?.stale || 0), expectedParticipantScale: "50–70" },
     clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results, purges: clawmaxPurges.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,

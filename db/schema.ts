@@ -257,6 +257,34 @@ export const agentDesignBlueprints = sqliteTable("agent_design_blueprints", {
   index("agent_design_blueprints_team_idx").on(table.teamId, table.updatedAt),
 ]);
 
+export const assistantTokenUsage = sqliteTable("assistant_token_usage", {
+  scopeType: text("scope_type", { enum: ["event", "team", "participant"] }).notNull(),
+  scopeId: text("scope_id").notNull(),
+  usedTokens: integer("used_tokens").notNull().default(0),
+  reservedTokens: integer("reserved_tokens").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [uniqueIndex("assistant_token_usage_scope_unique").on(table.scopeType, table.scopeId)]);
+
+export const assistantTokenReservations = sqliteTable("assistant_token_reservations", {
+  requestId: text("request_id").primaryKey(),
+  promptEventId: text("prompt_event_id").notNull(),
+  eventId: text("event_id").notNull(),
+  participantId: text("participant_id").notNull(),
+  teamId: text("team_id"),
+  estimatedTokens: integer("estimated_tokens").notNull(),
+  actualTokens: integer("actual_tokens"),
+  status: text("status", { enum: ["reserved", "processing", "completed", "failed", "expired"] }).notNull().default("reserved"),
+  expiresAt: integer("expires_at").notNull(),
+  errorCode: text("error_code"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("assistant_token_reservations_prompt_unique").on(table.promptEventId),
+  index("assistant_token_reservations_event_status_idx").on(table.eventId, table.status, table.expiresAt),
+  index("assistant_token_reservations_team_status_idx").on(table.teamId, table.status, table.expiresAt),
+  index("assistant_token_reservations_participant_status_idx").on(table.participantId, table.status, table.expiresAt),
+]);
+
 export const agentDesignEvents = sqliteTable("agent_design_events", {
   id: text("id").primaryKey(),
   eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
@@ -303,6 +331,8 @@ export const promptEvents = sqliteTable("prompt_events", {
   index("prompt_events_participant_created_idx").on(table.anonymousParticipantId, table.createdAt),
   index("prompt_events_parent_idx").on(table.parentPromptEventId),
   index("prompt_events_conversation_idx").on(table.conversationId, table.createdAt),
+  index("prompt_events_status_created_idx").on(table.status, table.createdAt),
+  index("prompt_events_team_status_created_idx").on(table.anonymousTeamId, table.status, table.createdAt),
 ]);
 
 export const assistantFeedbackEvents = sqliteTable("assistant_feedback_events", {
@@ -411,9 +441,12 @@ export const cogneeSyncOutbox = sqliteTable("cognee_sync_outbox", {
   lastError: text("last_error"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   syncedAt: integer("synced_at", { mode: "timestamp" }),
+  claimId: text("claim_id"),
+  claimedAt: integer("claimed_at", { mode: "timestamp" }),
 }, (table) => [
   uniqueIndex("cognee_sync_source_unique").on(table.sourceType, table.sourceId),
   index("cognee_sync_status_idx").on(table.status, table.createdAt),
+  index("cognee_sync_claim_idx").on(table.claimId),
 ]);
 
 export const promptEvaluations = sqliteTable("prompt_evaluations", {

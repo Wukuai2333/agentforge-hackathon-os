@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "agentforge-hackathon-os",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-09-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agentforge-hackathon-prod",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "COGNEE_SYNC_QUEUE", "queue": "agentforge-cognee-sync" }
+    ],
+    "consumers": [
+      { "queue": "agentforge-cognee-sync", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 5, "dead_letter_queue": "agentforge-cognee-sync-dlq" }
+    ]
+  },
+  "triggers": { "crons": ["*/5 * * * *"] }
+}

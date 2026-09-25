@@ -1,6 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { expireStaleReservations } from "../lib/assistant-budget";
+import { syncPendingMemory } from "../lib/cognee-delivery";
 
 interface Env {
   ASSETS: Fetcher;
@@ -12,6 +14,10 @@ interface Env {
       };
     };
   };
+  COGNEE_API_KEY?: string;
+  COGNEE_API_URL?: string;
+  COGNEE_LEARNING_DATASET?: string;
+  COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> };
 }
 
 interface ExecutionContext {
@@ -41,6 +47,16 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+  },
+  async queue(batch: { messages: Array<{ ack(): void; retry(): void }> }, env: Env): Promise<void> {
+    const result = await syncPendingMemory(env, 25);
+    for (const message of batch.messages) {
+      if (result.error) message.retry();
+      else message.ack();
+    }
+  },
+  async scheduled(_event: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(Promise.all([syncPendingMemory(env, 50), expireStaleReservations(env)]));
   },
 };
 

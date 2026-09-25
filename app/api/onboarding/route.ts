@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { requireCurrentAccount } from "../../../lib/account";
-import { syncPendingMemory } from "../../../lib/cognee-delivery";
+import { wakeCogneeSync } from "../../../lib/cognee-delivery";
 
 type ResponseLength = "brief" | "balanced" | "detailed";
 type InteractionMode = "guide" | "collaborate" | "direct";
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
         }), now),
     ]),
   ]);
-  waitUntil(syncPendingMemory(env, 20));
+  waitUntil(wakeCogneeSync(env));
   return Response.json({ completed: true, responseLength, interactionMode });
 }
 
