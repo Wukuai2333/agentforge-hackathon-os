@@ -5,14 +5,27 @@ export async function GET(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
   if (auth.error) return auth.error;
   const account = auth.account!;
-  const [consent, projects, prompts, memory, progress, authoredNotes, clawmaxConnections, clawmaxEvents] = await Promise.all([
+  const [consent, projects, blueprint, blueprintEvents, prompts, feedback, memory, progress, checkins, learnerNotes, authoredNotes, clawmaxConnections, clawmaxEvents] = await Promise.all([
     env.DB.prepare("SELECT id,policy_version AS policyVersion,status,choices_json AS choicesJson,recorded_at AS recordedAt FROM consent_records WHERE event_participant_id=? ORDER BY recorded_at DESC").bind(account.participantId).all(),
     env.DB.prepare("SELECT id,title,problem,success_criteria AS successCriteria,status,created_at AS createdAt,updated_at AS updatedAt FROM agent_projects WHERE anonymous_participant_id=? ORDER BY updated_at DESC").bind(account.participantId).all(),
+    env.DB.prepare(`SELECT blueprint_version AS blueprintVersion,answers_json AS answersJson,current_step AS currentStep,status,
+      project_id AS projectId,created_at AS createdAt,updated_at AS updatedAt,completed_at AS completedAt
+      FROM agent_design_blueprints WHERE event_participant_id=?`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,event_type AS eventType,question_id AS questionId,payload_json AS payloadJson,occurred_at AS occurredAt
+      FROM agent_design_events WHERE event_participant_id=? ORDER BY occurred_at DESC`).bind(account.participantId).all(),
     env.DB.prepare(`SELECT p.id,p.page,p.tutorial_step AS tutorialStep,p.user_prompt AS userPrompt,p.response_text AS responseText,p.model_name AS modelName,p.input_tokens AS inputTokens,p.output_tokens AS outputTokens,p.status,p.user_feedback AS userFeedback,p.created_at AS createdAt,
       c.status AS memoryStatus,c.synced_at AS memorySyncedAt FROM prompt_events p LEFT JOIN cognee_sync_outbox c ON c.source_type='prompt_event' AND c.source_id=p.id WHERE p.anonymous_participant_id=? ORDER BY p.created_at DESC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,prompt_event_id AS promptEventId,feedback,reason_code AS reasonCode,note,created_at AS createdAt
+      FROM assistant_feedback_events WHERE anonymous_participant_id=? ORDER BY created_at DESC`).bind(account.participantId).all(),
     env.DB.prepare(`SELECT m.id,m.entry_kind AS entryKind,m.category,m.statement,m.source_type AS sourceType,m.confidence_percent AS confidencePercent,m.confirmed_by_participant AS confirmedByParticipant,m.observed_at AS observedAt,
       c.status AS memoryStatus,c.synced_at AS memorySyncedAt FROM participant_model_entries m LEFT JOIN cognee_sync_outbox c ON c.source_type='participant_model' AND c.source_id=m.id WHERE m.anonymous_participant_id=? ORDER BY m.observed_at DESC`).bind(account.participantId).all(),
     env.DB.prepare("SELECT id,milestone,status,source,occurred_at AS occurredAt FROM event_progress_events WHERE event_participant_id=? ORDER BY occurred_at DESC").bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,checkpoint_type AS checkpointType,stage,prompt_event_id AS promptEventId,
+      scaffold_level AS scaffoldLevel,response_json AS responseJson,created_at AS createdAt
+      FROM learning_checkins WHERE event_participant_id=? ORDER BY created_at DESC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,content,selected_text AS selectedText,source_type AS sourceType,source_page AS sourcePage,
+      source_prompt_event_id AS sourcePromptEventId,created_at AS createdAt,updated_at AS updatedAt
+      FROM learner_notes WHERE event_participant_id=? ORDER BY updated_at DESC`).bind(account.participantId).all(),
     env.DB.prepare("SELECT id,team_id AS teamId,content,source_type AS sourceType,created_at AS createdAt,updated_at AS updatedAt FROM shared_notes WHERE author_id=? ORDER BY created_at DESC").bind(account.participantId).all(),
     env.DB.prepare(`SELECT id,destination_id AS destinationId,external_workspace_id AS workspaceId,status,
       created_at AS createdAt,updated_at AS updatedAt,revoked_at AS revokedAt
@@ -28,9 +41,14 @@ export async function GET(request: Request) {
     relationship: { userId: account.userId, eventRegistrationId: account.participantId, eventId: account.eventId, teamId: account.teamId },
     consent: consent.results,
     projects: projects.results,
+    agentBlueprint: blueprint.results,
+    agentDesignEvents: blueprintEvents.results,
     prompts: prompts.results,
+    assistantFeedback: feedback.results,
     memory: memory.results,
     progress: progress.results,
+    learningCheckins: checkins.results,
+    learnerNotes: learnerNotes.results,
     authoredTeamNotes: authoredNotes.results,
     clawmax: { connections: clawmaxConnections.results, importedActivity: clawmaxEvents.results },
     deletion: { availableHere: false, note: "Single-record deletion is intentionally not enabled in this phase. Event retention and a reviewed deletion workflow will be handled separately." },

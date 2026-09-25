@@ -240,6 +240,37 @@ export const agentProjects = sqliteTable("agent_projects", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+export const agentDesignBlueprints = sqliteTable("agent_design_blueprints", {
+  eventParticipantId: text("event_participant_id").primaryKey().references(() => eventParticipants.id),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  teamId: text("team_id").references(() => teams.id),
+  blueprintVersion: text("blueprint_version").notNull(),
+  answersJson: text("answers_json").notNull(),
+  currentStep: integer("current_step").notNull().default(0),
+  status: text("status", { enum: ["draft", "completed"] }).notNull().default("draft"),
+  projectId: text("project_id").references(() => agentProjects.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+}, (table) => [
+  index("agent_design_blueprints_event_idx").on(table.eventId, table.updatedAt),
+  index("agent_design_blueprints_team_idx").on(table.teamId, table.updatedAt),
+]);
+
+export const agentDesignEvents = sqliteTable("agent_design_events", {
+  id: text("id").primaryKey(),
+  eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  teamId: text("team_id").references(() => teams.id),
+  eventType: text("event_type", { enum: ["draft_autosave", "answer_saved", "example_opened", "answer_revisited", "blueprint_completed", "blueprint_revised"] }).notNull(),
+  questionId: text("question_id"),
+  payloadJson: text("payload_json").notNull(),
+  occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("agent_design_events_participant_idx").on(table.eventParticipantId, table.occurredAt),
+  index("agent_design_events_event_idx").on(table.eventId, table.eventType, table.occurredAt),
+]);
+
 export const promptEvents = sqliteTable("prompt_events", {
   id: text("id").primaryKey(),
   parentPromptEventId: text("parent_prompt_event_id"),
@@ -263,7 +294,7 @@ export const promptEvents = sqliteTable("prompt_events", {
   estimatedCostMicros: integer("estimated_cost_micros"),
   status: text("status", { enum: ["success", "error", "blocked"] }).notNull(),
   errorCode: text("error_code"),
-  userFeedback: text("user_feedback", { enum: ["helpful", "not_helpful"] }),
+  userFeedback: text("user_feedback", { enum: ["helpful", "partly_helpful", "not_helpful"] }),
   outcomeStatus: text("outcome_status", { enum: ["worked", "partial", "not_worked"] }),
   outcomeEvidence: text("outcome_evidence"),
   improvementId: text("improvement_id"),
@@ -280,11 +311,29 @@ export const assistantFeedbackEvents = sqliteTable("assistant_feedback_events", 
   anonymousParticipantId: text("anonymous_participant_id").notNull(),
   anonymousTeamId: text("anonymous_team_id"),
   participantDisplayName: text("participant_display_name").notNull(),
-  feedback: text("feedback", { enum: ["helpful", "not_helpful"] }).notNull(),
+  feedback: text("feedback", { enum: ["helpful", "partly_helpful", "not_helpful"] }).notNull(),
+  reasonCode: text("reason_code", { enum: ["incorrect", "too_long", "missing_context", "not_relevant", "unclear_next_step", "other"] }),
+  note: text("note"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (table) => [
   index("assistant_feedback_prompt_idx").on(table.promptEventId, table.createdAt),
   index("assistant_feedback_participant_idx").on(table.anonymousParticipantId, table.createdAt),
+]);
+
+export const learnerNotes = sqliteTable("learner_notes", {
+  id: text("id").primaryKey(),
+  eventParticipantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  content: text("content").notNull(),
+  selectedText: text("selected_text"),
+  sourceType: text("source_type", { enum: ["manual", "selection", "assistant"] }).notNull().default("manual"),
+  sourcePage: text("source_page"),
+  sourcePromptEventId: text("source_prompt_event_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("learner_notes_participant_idx").on(table.eventParticipantId, table.updatedAt),
+  index("learner_notes_prompt_idx").on(table.sourcePromptEventId),
 ]);
 
 export const tutorialVersions = sqliteTable("tutorial_versions", {
@@ -504,6 +553,12 @@ export const clawmaxEnrollmentCodes = sqliteTable("clawmax_enrollment_codes", {
   index("idx_clawmax_enrollment_codes_participant").on(table.participantId, table.createdAt),
 ]);
 
+export const participantOrientationAcknowledgements = sqliteTable("participant_orientation_acknowledgements", {
+  participantId: text("participant_id").primaryKey().references(() => eventParticipants.id),
+  orientationVersion: text("orientation_version").notNull(),
+  acknowledgedAt: integer("acknowledged_at", { mode: "timestamp" }).notNull(),
+});
+
 export const participantOnboardingProfiles = sqliteTable("participant_onboarding_profiles", {
   participantId: text("participant_id").primaryKey().references(() => eventParticipants.id),
   onboardingVersion: text("onboarding_version").notNull(),
@@ -533,6 +588,21 @@ export const participantOnboardingRevisions = sqliteTable("participant_onboardin
   changeSource: text("change_source").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (table) => [index("participant_onboarding_revisions_participant_idx").on(table.participantId, table.createdAt)]);
+
+export const learningCheckins = sqliteTable("learning_checkins", {
+  id: text("id").primaryKey(),
+  participantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
+  teamId: text("team_id").references(() => teams.id),
+  checkpointType: text("checkpoint_type", { enum: ["baseline", "episode_reflection", "transfer"] }).notNull(),
+  stage: text("stage").notNull(),
+  promptEventId: text("prompt_event_id").references(() => promptEvents.id),
+  scaffoldLevel: text("scaffold_level", { enum: ["explicit", "light", "minimal"] }).notNull(),
+  responseJson: text("response_json").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("learning_checkins_participant_idx").on(table.participantId, table.createdAt),
+  index("learning_checkins_type_idx").on(table.checkpointType, table.createdAt),
+]);
 
 export const clawmaxPartnerEnrollments = sqliteTable("clawmax_partner_enrollments", {
   id: text("id").primaryKey(),

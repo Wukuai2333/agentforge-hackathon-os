@@ -118,7 +118,8 @@ test("updates a participant-controlled model from evidence-linked Cognee inferen
 test("uses Shared Space for team collaboration without renaming Cognee concepts", async () => {
   const portal = await source("app/portal.tsx");
   assert.match(portal, />Shared Space</);
-  assert.match(portal, /Add to shared space/);
+  assert.match(portal, /TEAM COLLABORATION/);
+  assert.match(portal, /nothing here is shared automatically/i);
   assert.doesNotMatch(portal, />Shared Brain</);
   assert.match(portal, /COGNEE SEMANTIC MEMORY/);
 });
@@ -220,15 +221,18 @@ test("manages registered users with server roles and enforces registration state
 
 test("lets participants replace selected Ask AI context while the drawer stays open", async () => {
   const [portal, styles, selectionStyles] = await Promise.all([source("app/portal.tsx"), source("app/globals.css"), source("app/selection-clawmax.css")]);
-  assert.match(portal, /closest\("input, textarea, button, a, \.assistant, \.selection-ask-action"\)/);
-  assert.match(portal, /Ask Agent about this/);
+  assert.match(portal, /closest\("input, textarea, button, a, \.assistant, \.selection-context-menu"\)/);
+  assert.match(portal, />Ask AI</);
+  assert.match(portal, /Take Notes/);
   assert.match(portal, /getRangeAt\(0\)\.getBoundingClientRect\(\)/);
   assert.match(portal, /setAssistantContext\(selectionAction\.text\)/);
   assert.doesNotMatch(portal, /setAssistantContext\(selected\); openAssistant\(\)/);
+  assert.match(portal, /What should my agent remember, what should it verify, and where should I stay in control/);
   assert.match(portal, /Highlight different text on the page to replace this context/);
   assert.match(styles, /\.assistant-backdrop[^}]*pointer-events:none/);
   assert.match(styles, /\.assistant[^}]*pointer-events:auto/);
-  assert.match(selectionStyles, /\.selection-ask-action\{position:fixed/);
+  assert.match(selectionStyles, /\.selection-context-menu\{position:fixed/);
+  assert.match(selectionStyles, /never opens the assistant by itself/);
 });
 
 test("explains the temporary ClawMax SDK BYOK setup without promising the Cloud flow", async () => {
@@ -242,16 +246,55 @@ test("explains the temporary ClawMax SDK BYOK setup without promising the Cloud 
   assert.match(portal, /should not assume they will need personal keys until that workflow is confirmed/);
 });
 
-test("ships a current official-docs Cognee onboarding path", async () => {
+test("removes the Cognee tutorial and legacy build path from participant navigation", async () => {
   const portal = await source("app/portal.tsx");
-  assert.match(portal, /COGNEE ONBOARDING/);
-  assert.match(portal, /remember\(\).*recall\(\)/s);
-  assert.match(portal, /LEGACY \/ ADVANCED CONTROL/);
-  assert.match(portal, /add\(\).*cognify\(\).*search\(\)/s);
-  assert.match(portal, /Operational facts and semantic memory have different jobs/);
-  assert.match(portal, /docs\.cognee\.ai\/core-concepts\/main-operations\/remember/);
-  assert.match(portal, /COGNEE_API_KEY="your-key-from-cognee-cloud"/);
-  assert.match(portal, /Never paste this key into prompts/);
+  assert.doesNotMatch(portal, /setView\("cogneeTutorial"\)/);
+  assert.doesNotMatch(portal, /RECOMMENDED BUILD PATH/);
+  assert.doesNotMatch(portal, /From idea to measurable improvement/);
+  assert.match(portal, /className="prompt-coach-placeholder"/);
+});
+
+test("captures three lightweight evidence check-ins without turning them into progress grades", async () => {
+  const [portal, route, schema, migration, me] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/checkins/route.ts"), source("db/schema.ts"),
+    source("drizzle/0025_learning_checkins.sql"), source("app/api/me/route.ts"),
+  ]);
+  assert.match(portal, /THREE SHORT RESEARCH MOMENTS/);
+  assert.match(portal, /baseline/);
+  assert.match(portal, /episode_reflection/);
+  assert.match(portal, /transfer/);
+  assert.match(portal, /No completion grade/);
+  assert.doesNotMatch(portal, /Turn a busy day into visible progress/);
+  assert.match(route, /scaffoldLevel/);
+  assert.match(route, /The linked Prompt does not belong to this participant/);
+  assert.match(schema, /learningCheckins/);
+  assert.match(migration, /CREATE TABLE `learning_checkins`/);
+  assert.match(me, /learningCheckins/);
+});
+
+test("introduces FEVI before the portal and captures structured response feedback", async () => {
+  const [portal, assistant, organizer, account, schema, feedbackMigration, orientationMigration, me] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/assistant/route.ts"), source("app/api/organizer/route.ts"),
+    source("lib/account.ts"), source("db/schema.ts"), source("drizzle/0026_structured_assistant_feedback.sql"),
+    source("drizzle/0027_fevi_orientation_acknowledgement.sql"), source("app/api/me/route.ts"),
+  ]);
+  assert.match(portal, /Use AI actively—not automatically/);
+  assert.match(portal, /Formulate/);
+  assert.match(portal, /Engage/);
+  assert.match(portal, /Verify/);
+  assert.match(portal, /Integrate/);
+  assert.match(portal, /clearly labeled practice checks/);
+  assert.match(portal, /You can skip it without losing access to help/);
+  assert.match(portal, /Partly helpful/);
+  assert.match(portal, /Unclear next step/);
+  assert.match(assistant, /partly_helpful/);
+  assert.match(assistant, /reasonCode/);
+  assert.match(organizer, /reason_code AS reasonCode/);
+  assert.match(account, /orientationCompleted/);
+  assert.match(schema, /participantOrientationAcknowledgements/);
+  assert.match(feedbackMigration, /reason_code/);
+  assert.match(orientationMigration, /participant_orientation_acknowledgements/);
+  assert.match(me, /assistantFeedback/);
 });
 
 test("ships a consent-gated ClawMax enrollment and normalization path", async () => {
@@ -327,4 +370,54 @@ test("enforces one active team and organizer-audited team moves", async () => {
   assert.match(portal, /Earlier records stay linked to the previous team/);
   assert.match(migration, /workspace_kind/);
   assert.match(migration, /change_reason/);
+});
+
+test("builds a resumable participant-authored Agent Blueprint with optional inspiration", async () => {
+  const [portal, canvas, schema, migration, me, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/canvas/route.ts"), source("db/schema.ts"),
+    source("drizzle/0028_agent_design_blueprint.sql"), source("app/api/me/route.ts"), source("app/globals.css"),
+  ]);
+  assert.match(portal, /Design Your Agent/);
+  assert.match(portal, /one question at a time/i);
+  assert.match(portal, /PARTICIPANT AGENT BLUEPRINT/);
+  assert.match(portal, /I need an example/);
+  assert.match(portal, /target="_blank"/);
+  assert.match(portal, /docs\.google\.com\/document\/d\/1Y7Cfkbg5sqrW9xliJhMAlbSepcigFmvqMp9TxrEhSrM/);
+  assert.match(portal, /Daily GTM Brief/);
+  assert.match(portal, /Import POs into QuickBooks/);
+  assert.match(portal, /Human checkpoints/);
+  assert.match(portal, /Success & failure test/);
+  assert.doesNotMatch(portal, /DRAFT BUILD BRIEF/);
+  assert.match(canvas, /draft_autosave/);
+  assert.match(canvas, /example_opened/);
+  assert.match(canvas, /answer_revisited/);
+  assert.match(canvas, /blueprint_revised/);
+  assert.match(canvas, /superseded_by_id/);
+  assert.match(schema, /agentDesignBlueprints/);
+  assert.match(schema, /agentDesignEvents/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `agent_design_blueprints`/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `agent_design_events`/);
+  assert.match(me, /agentDesignEvents/);
+  assert.match(styles, /\.agent-design-workspace/);
+  assert.match(styles, /\.agent-blueprint-live/);
+});
+
+test("keeps a private Learner Center for notes and Ask AI history", async () => {
+  const [portal, api, schema, migration, me, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/learning-center/route.ts"), source("db/schema.ts"),
+    source("drizzle/0029_learner_center.sql"), source("app/api/me/route.ts"), source("app/globals.css"),
+  ]);
+  assert.match(portal, /Learner Center/);
+  assert.match(portal, /YOUR PRIVATE LEARNING RECORD/);
+  assert.match(portal, /My Notes/);
+  assert.match(portal, /Ask AI History/);
+  assert.match(portal, /Save to Learner Center/);
+  assert.match(api, /requireCurrentAccount/);
+  assert.match(api, /WHERE event_participant_id=\?/);
+  assert.match(api, /sourceType === "selection"/);
+  assert.match(schema, /learnerNotes/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `learner_notes`/);
+  assert.match(me, /learnerNotes/);
+  assert.match(styles, /\.learner-center-page/);
+  assert.match(styles, /\.selection-coach/);
 });

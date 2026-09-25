@@ -72,6 +72,7 @@ export type CurrentAccount = {
   teamName: string | null;
   inviteCode: string | null;
   onboardingCompleted: number;
+  orientationCompleted: number;
   responseLength: "brief" | "balanced" | "detailed" | null;
   interactionMode: "guide" | "collaborate" | "direct" | null;
 };
@@ -101,6 +102,7 @@ export async function currentAccount(db: D1Database, identity: AuthIdentity): Pr
       u.display_name AS displayName, u.email, ep.role, ep.consent_version AS consentVersion,
       t.id AS teamId, t.name AS teamName, t.invite_code AS inviteCode,
       CASE WHEN pop.participant_id IS NULL THEN 0 ELSE 1 END AS onboardingCompleted,
+      CASE WHEN poa.participant_id IS NULL THEN 0 ELSE 1 END AS orientationCompleted,
       pop.response_length AS responseLength,pop.interaction_mode AS interactionMode
     FROM app_users u
     JOIN event_participants ep ON ep.user_id=u.id
@@ -108,6 +110,7 @@ export async function currentAccount(db: D1Database, identity: AuthIdentity): Pr
     LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
     LEFT JOIN teams t ON t.id=tm.team_id AND t.status='active'
     LEFT JOIN participant_onboarding_profiles pop ON pop.participant_id=ep.id
+    LEFT JOIN participant_orientation_acknowledgements poa ON poa.participant_id=ep.id
     WHERE (ui.provider=? AND ui.provider_subject=?)
        OR (u.identity_provider=? AND u.identity_subject=?)
     ORDER BY ep.joined_at DESC LIMIT 1`)

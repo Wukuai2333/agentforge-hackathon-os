@@ -5,9 +5,10 @@ import { syncPendingMemory } from "../../../lib/cognee-delivery";
 type ResponseLength = "brief" | "balanced" | "detailed";
 type InteractionMode = "guide" | "collaborate" | "direct";
 type Answer = { id: string; value: string };
-type Input = { answers?: Answer[]; responseLength?: ResponseLength; interactionMode?: InteractionMode; draft?: boolean; currentStep?: number; changeSource?: string };
+type Input = { answers?: Answer[]; responseLength?: ResponseLength; interactionMode?: InteractionMode; draft?: boolean; currentStep?: number; changeSource?: string; orientationAcknowledged?: boolean };
 
 const ONBOARDING_VERSION = "agentforge-interviewer-v1";
+const ORIENTATION_VERSION = "agentforge-fevi-orientation-v1";
 const questionIds = ["introduction", "background", "stage", "field", "ai_experience", "agent_experience", "learning_goal"] as const;
 const required = ["background", "stage", "field", "learning_goal"] as const;
 const categoryLabels: Record<(typeof questionIds)[number], string> = {
@@ -44,6 +45,14 @@ export async function POST(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
   if (auth.error) return auth.error;
   const input = await request.json() as Input;
+  if (input.orientationAcknowledged) {
+    const acknowledgedAt = Date.now();
+    await env.DB.prepare(`INSERT INTO participant_orientation_acknowledgements
+      (participant_id,orientation_version,acknowledged_at) VALUES (?,?,?)
+      ON CONFLICT(participant_id) DO UPDATE SET orientation_version=excluded.orientation_version,acknowledged_at=excluded.acknowledged_at`)
+      .bind(auth.account!.participantId, ORIENTATION_VERSION, acknowledgedAt).run();
+    return Response.json({ acknowledged: true, orientationVersion: ORIENTATION_VERSION, acknowledgedAt });
+  }
   const responseLength = validLength(input.responseLength) ? input.responseLength : "brief";
   const interactionMode = validMode(input.interactionMode) ? input.interactionMode : "guide";
   const values = new Map((input.answers || []).map((answer) => [answer.id, clean(answer.value)]));

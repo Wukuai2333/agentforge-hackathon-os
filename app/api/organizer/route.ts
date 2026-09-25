@@ -58,7 +58,8 @@ export async function GET(request: Request) {
       FROM prompt_events ORDER BY created_at DESC LIMIT 100`).all(),
     runtime.DB.prepare(`SELECT afe.id, afe.prompt_event_id AS promptEventId,
       afe.anonymous_participant_id AS participantId, afe.anonymous_team_id AS teamId,
-      afe.participant_display_name AS participantDisplayName, afe.feedback, afe.created_at AS createdAt,
+      afe.participant_display_name AS participantDisplayName, afe.feedback,
+      afe.reason_code AS reasonCode, afe.note, afe.created_at AS createdAt,
       pe.page, pe.tutorial_step AS tutorialStep, pe.user_prompt AS userPrompt
       FROM assistant_feedback_events afe JOIN prompt_events pe ON pe.id=afe.prompt_event_id
       ORDER BY afe.created_at DESC LIMIT 100`).all(),
@@ -117,7 +118,7 @@ export async function GET(request: Request) {
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
   const safeFeedbacks = feedbacks.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) }));
-  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "team_memberships", "team_invites"];
+  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "participant_orientation_acknowledgements", "assistant_feedback_events", "learning_checkins", "learner_notes", "agent_design_blueprints", "agent_design_events", "team_memberships", "team_invites"];
   const schemaTables = await runtime.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<{ name: string }>();
   const presentTables = new Set(schemaTables.results.map((row) => row.name));
   const missingTables = requiredTables.filter((name) => !presentTables.has(name));

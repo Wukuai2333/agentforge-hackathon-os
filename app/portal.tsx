@@ -1,45 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CompanyBrainTutorial } from "./company-brain-tutorial";
 
-type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "cogneeTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
+type View = "home" | "onboarding" | "learn" | "clawmaxTutorial" | "companyBrainTutorial" | "progress" | "coach" | "demo" | "team" | "model" | "data" | "admin" | "eventAdmin" | "settings" | "policy";
 type PortalRole = "participant" | "organizer";
 type EntryStage = "auth" | "consent" | "team" | "survey" | "portal";
 type ResponseLength = "brief" | "balanced" | "detailed";
 type InteractionMode = "guide" | "collaborate" | "direct";
-type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null; onboardingCompleted?: number | boolean; responseLength?: ResponseLength | null; interactionMode?: InteractionMode | null };
-type SelectionAction = { text: string; left: number; top: number } | null;
+type PortalUser = { id?: string; provider?: "email" | "google-demo"; userId?: string; participantId?: string; eventId?: string; displayName: string; email: string; role: PortalRole; consentVersion?: string; teamId?: string | null; teamName?: string | null; inviteCode?: string | null; onboardingCompleted?: number | boolean; orientationCompleted?: number | boolean; responseLength?: ResponseLength | null; interactionMode?: InteractionMode | null };
+type SelectionAction = { text: string; left: number; top: number; status?: "idle" | "saving" | "saved" | "error" } | null;
 
 const nav: Array<{ id: View; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "Overview" },
-  { id: "onboarding", icon: "✦", label: "Agent Canvas" },
-  { id: "learn", icon: "▤", label: "Learning Center" },
-  { id: "progress", icon: "◎", label: "Build Progress" },
+  { id: "onboarding", icon: "✦", label: "Design Your Agent" },
+  { id: "learn", icon: "▤", label: "Learner Center" },
+  { id: "progress", icon: "◎", label: "Build Check-ins" },
   { id: "coach", icon: "◇", label: "Prompt Coach" },
   { id: "demo", icon: "▶", label: "Demo & Evaluation" },
-];
-
-const milestones = [
-  ["Idea selected", "Turn a personal pain point into one clear agent goal."],
-  ["First agent working", "Run one end-to-end task successfully."],
-  ["ClawMax connected", "Connect and verify your agent workspace."],
-  ["Cognee connected", "Create a memory dataset for your team."],
-  ["First memory stored", "Add and cognify one useful source."],
-  ["Agent retrieves memory", "Answer a question using saved context."],
-  ["Evaluation case created", "Define a repeatable success test."],
-  ["Feedback received", "Collect structured peer or mentor feedback."],
-  ["Improvement completed", "Ship and measure one improvement."],
-  ["Multi-agent sharing", "Use another agent or team memory source."],
-  ["Final demo ready", "Prepare a 60–90 second evidence-led demo."],
-] as const;
-
-const lessons = [
-  { n: "01", title: "Shape a useful agent", meta: "12 min · Agent design", status: "Done", color: "lime" },
-  { n: "02", title: "Build your first ClawMax agent", meta: "20 min · ClawMax", status: "In progress", color: "violet" },
-  { n: "03", title: "Remember your first source", meta: "15 min · Cognee v1.0", status: "Start", color: "blue" },
-  { n: "04", title: "Recall and verify context", meta: "15 min · Cognee v1.0", status: "Locked", color: "orange" },
-  { n: "05", title: "Evaluate and improve", meta: "16 min · Evaluation", status: "Locked", color: "pink" },
 ];
 
 function Icon({ children }: { children: React.ReactNode }) {
@@ -55,6 +33,48 @@ const demoPrivacySections = [
   ["05 · Humans stay in the pull request", "Organizers may review prompts, errors, feedback, and learning signals to support participants and improve tutorials. Suggested tutorial changes require human review before publication. The system should never silently turn a model guess into a participant score, disciplinary decision, or final truth."],
   ["06 · Demo retention and deletion", "This is placeholder policy copy for product demonstration, not the final event policy. The real retention period, deletion workflow, access list, vendors, and participant rights still require organizer and legal review. For the demo, signing out does not automatically erase shared event records."],
 ];
+
+type BlueprintAnswer = { selections: string[]; detail: string };
+type BlueprintAnswers = Record<string, BlueprintAnswer>;
+type BlueprintQuestion = {
+  id: string;
+  label: string;
+  prompt: string;
+  helper: string;
+  choices: string[];
+  multiple?: boolean;
+  optional?: boolean;
+  detailRequired?: boolean;
+  detailLabel: string;
+  placeholder: string;
+  example: string;
+};
+
+const agentBlueprintQuestions: BlueprintQuestion[] = [
+  { id: "context", label: "User & context", prompt: "Where in your life or work should this agent help?", helper: "Choose the closest setting, then add only the context that changes what the agent should do.", choices: ["Personal life", "Academic or learning", "Professional or company", "Community or public service", "Other or mixed"], detailLabel: "Who is this for, and what situation are they in?", placeholder: "For example: a graduate student balancing courses, research, and recruiting…", example: "Academic or learning — I am a graduate student who needs to keep course deadlines and project commitments from colliding." },
+  { id: "problem", label: "Problem", prompt: "What repeated problem is worth solving?", helper: "Describe one concrete moment of friction. Avoid naming an agent before the problem is clear.", choices: ["Repetitive manual work", "Information is scattered", "Important follow-ups are missed", "Monitoring takes too much time", "Decisions lack context", "Coordination breaks down"], multiple: true, detailRequired: true, detailLabel: "What happens today, and why is it frustrating?", placeholder: "Every week I…, but I often…", example: "Every weekday I scan several sources for relevant account news, but I miss changes and spend too long deciding what matters." },
+  { id: "trigger", label: "Trigger", prompt: "What should tell the agent that it is time to act?", helper: "A precise trigger turns a broad idea into a workflow you can test.", choices: ["A schedule", "A new message or file", "A user request", "A deadline or milestone", "A change in monitored data", "Another system event"], detailRequired: true, detailLabel: "Make the trigger specific.", placeholder: "At 8:00 a.m. every weekday… / When a purchase-order email arrives…", example: "At 8:00 a.m. every weekday, before my first meeting." },
+  { id: "inputs", label: "Inputs & boundaries", prompt: "What information may the agent use—and what stays off limits?", helper: "Select likely sources, then state freshness, privacy, or access boundaries.", choices: ["Email or messages", "Documents or notes", "Calendar or tasks", "Web or news", "Business system or API", "Manual user input"], multiple: true, detailRequired: true, detailLabel: "What must be current, private, or excluded?", placeholder: "It may read…, but it must never…", example: "It may read my calendar and project notes, but not personal email; news must be less than 24 hours old." },
+  { id: "responsibilities", label: "Agent responsibilities", prompt: "What work should the agent actually perform?", helper: "Choose actions, not product features. Keep the first version small enough to demonstrate today.", choices: ["Search and summarize", "Compare and prioritize", "Draft or recommend", "Monitor and notify", "Update another system", "Ask clarifying questions"], multiple: true, detailRequired: true, detailLabel: "Describe the smallest useful end-to-end workflow.", placeholder: "First…, then…, and finally…", example: "Collect relevant updates, rank the five most important actions, explain why each matters, and suggest one next step." },
+  { id: "checkpoints", label: "Human checkpoints", prompt: "Where must a person review or decide?", helper: "Automation is not all-or-nothing. Mark where mistakes would be costly or judgment matters.", choices: ["Before an external action", "Before changing stored data", "When confidence is low", "Before final approval", "At a scheduled review", "Automatic within clear limits"], multiple: true, detailRequired: true, detailLabel: "What can run automatically, and what needs approval?", placeholder: "The agent may…, but a person must approve…", example: "It may draft and rank actions automatically, but I must approve any email or CRM update." },
+  { id: "evidence", label: "Success & failure test", prompt: "What evidence would show that the agent is useful?", helper: "Name an observable result—and one failure that would make you revise the design.", choices: ["Time saved", "Fewer missed items", "More accurate output", "Better decision quality", "Completed transaction", "User satisfaction"], multiple: true, detailRequired: true, detailLabel: "How will you test success and recognize failure?", placeholder: "It succeeds when… It fails if…", example: "It succeeds if I can identify the same top actions in under five minutes; it fails if it invents account changes or misses a scheduled meeting." },
+  { id: "memory", label: "Memory & reporting", prompt: "What should persist, and how should the agent report back?", helper: "Optional · Store only context that makes future work better. Do not retain secrets just because storage is available.", choices: ["Remember preferences", "Remember prior decisions", "Remember people or projects", "No long-term memory", "Send a concise summary", "Notify only on exceptions"], multiple: true, optional: true, detailLabel: "Add a memory boundary or preferred output.", placeholder: "Remember…, forget…, and report by…", example: "Remember my priority accounts and accepted recommendations, but not raw email bodies. Send a five-item morning brief." },
+];
+
+const inspirationCases = [
+  ["Go-To-Market", "Daily GTM Brief"],
+  ["Go-To-Market", "Research This Prospect"],
+  ["Finance", "Import POs into QuickBooks"],
+  ["Education", "Schedule Manager for Students"],
+  ["Finance", "Stock News Monitor"],
+  ["Education", "Grading Agents for Instructors"],
+  ["Education", "Teamwork Agent for Students"],
+  ["Events", "Event Topic Monitoring"],
+  ["Events", "Speaker & Sponsor Monitoring"],
+  ["Career", "Job Application & Employer Response Agent"],
+] as const;
+
+const useCaseDocumentUrl = "https://docs.google.com/document/d/1Y7Cfkbg5sqrW9xliJhMAlbSepcigFmvqMp9TxrEhSrM/edit?tab=t.0#heading=h.bzhzgtzagfd7";
 
 const interviewerQuestions: Array<{ id: string; prompt: string; helper: string; placeholder: string; required: boolean; example?: string; choices?: string[] }> = [
   { id: "introduction", prompt: "First, tell me a little about yourself.", helper: "Optional · Share only what feels useful for supporting you during this hackathon.", placeholder: "What do you do, and what brought you here?", required: false, example: "Example: I am a product-design student exploring agents for research workflows." },
@@ -306,7 +326,7 @@ function LegacyEntryFlow({ eventName, onComplete }: { eventName: string; onCompl
 }
 
 function EntryFlow({ eventName, account, onComplete }: { eventName: string; account: PortalUser | null; onComplete: (user: PortalUser) => void }) {
-  const [stage, setStage] = useState<"auth" | "consent" | "team" | "survey">(!account ? "auth" : account.consentVersion === "pending" ? "consent" : account.teamId ? "survey" : "team");
+  const [stage, setStage] = useState<"auth" | "consent" | "team" | "survey" | "orientation">(!account ? "auth" : account.consentVersion === "pending" ? "consent" : !account.teamId ? "team" : account.onboardingCompleted && !account.orientationCompleted ? "orientation" : "survey");
   const [current, setCurrent] = useState(account);
   const [consentChecks, setConsentChecks] = useState([false, false, false]);
   const [teamMode, setTeamMode] = useState<"create" | "join">("create");
@@ -390,10 +410,17 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
 
   if (stage === "team" && current) return <div className="entry-survey team-entry"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>TEAM SETUP</small></span></div><span>ONE ACTIVE TEAM PER PERSON</span></header><main><section><span className="eyebrow">TEAM MEMBERSHIP</span><h1>Build with a team—or start solo.</h1><p>Create a team and share its invite code, join an existing team, or create a private Personal Workspace. Team changes later are handled by an Organizer so earlier Shared Space access stays auditable.</p><div className="auth-tabs"><button className={teamMode === "create" ? "active" : ""} onClick={() => setTeamMode("create")}>Create team</button><button className={teamMode === "join" ? "active" : ""} onClick={() => setTeamMode("join")}>Join team</button></div><label>{teamMode === "create" ? "TEAM NAME" : "INVITE CODE"}<input value={teamValue} onChange={(event) => setTeamValue(event.target.value)} placeholder={teamMode === "create" ? "Example: Team Synapse" : "8-character code"} /></label>{error && <p className="entry-error">{error}</p>}<div className="entry-survey-actions"><button className="text-button" disabled={saving} onClick={async () => { const next = await accountAction("continue_solo"); if (next) setStage("survey"); }}>{saving ? "Creating workspace…" : "Continue with a Personal Workspace"}</button><button className="primary" disabled={saving || !teamValue.trim()} onClick={async () => { const next = await accountAction(teamMode === "create" ? "create_team" : "join_team", teamMode === "create" ? { teamName: teamValue } : { inviteCode: teamValue }); if (next) setStage("survey"); }}>{saving ? "Saving…" : teamMode === "create" ? "Create team →" : "Join team →"}</button></div></section><aside><span>YOUR EVENT IDENTITY</span><div className="filled"><b>✓</b><span>{current.displayName}<small>{current.email}</small></span></div><div className="filled"><b>✓</b><span>Consent recorded<small>{current.consentVersion}</small></span></div><div><b>3</b><span>Team membership<small>Waiting for your choice</small></span></div></aside></main></div>;
 
+  if (stage === "orientation" && current) return <div className="fevi-orientation"><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>HOW WE SUPPORT YOUR REASONING</small></span></div><span>READY TO BUILD</span></header><main><section className="fevi-orientation-hero"><span className="eyebrow">A LIGHTWEIGHT LEARNING SCAFFOLD</span><h1>Use AI actively—not automatically.</h1><p>FEVI is a four-step habit for working with AI. It is here to support your decisions, not to grade your intelligence or writing style.</p><div className="fevi-orientation-grid">{[
+    ["F", "Formulate", "State the goal, useful context, boundaries, and what success looks like."],
+    ["E", "Engage", "Ask for the kind of help you need: a hint, critique, comparison, or breakdown."],
+    ["V", "Verify", "Check claims, logic, sources, assumptions, code, and test results before relying on them."],
+    ["I", "Integrate", "Choose what to accept, change, or reject—and make the final decision your own."],
+  ].map(([letter, title, copy]) => <article key={letter}><b>{letter}</b><div><strong>{title}</strong><p>{copy}</p></div></article>)}</div></section><aside className="fevi-research-notice"><span className="eyebrow">WHAT YOU MAY SEE</span><h2>Occasional, clearly labeled practice checks</h2><p>During the event, AgentForge may invite you to compare options, answer a short multiple-choice question, or inspect a deliberately incomplete or mixed-quality response.</p><ul><li>Every research check is clearly labeled.</li><li>You can skip it without losing access to help.</li><li>Normal Ask AI support is not intentionally degraded.</li><li>The goal is to practice noticing, checking, and deciding—not to catch you out.</li></ul><p className="fevi-reward-note"><strong>No score is shown here.</strong> Your reasoning evidence stays separate from event judging unless the event team publishes a separate, consented award process.</p>{error && <p className="entry-error">{error}</p>}<button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orientationAcknowledged: true }) }); if (!response.ok) throw new Error("Your orientation acknowledgement could not be saved."); onComplete({ ...current, orientationCompleted: true }); } catch (problem) { setError(problem instanceof Error ? problem.message : "Your orientation acknowledgement could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving…" : "I understand · enter the portal →"}</button></aside></main></div>;
+
   const complete = surveyStep >= interviewerQuestions.length;
   const question = interviewerQuestions[surveyStep];
   const visualStyle = { "--interview-x": `${pointer.x}%`, "--interview-y": `${pointer.y}%`, "--typing-energy": Math.min(1, answer.length / 180) } as React.CSSProperties;
-  return <div className="entry-survey interviewer-entry" style={visualStyle} onMouseMove={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); setPointer({ x: ((event.clientX - bounds.left) / bounds.width) * 100, y: ((event.clientY - bounds.top) / bounds.height) * 100 }); }}><div className="interviewer-atmosphere" aria-hidden="true"><i /><i /><i /><i /></div><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>PARTICIPANT INTERVIEW</small></span></div><span>{complete ? "YOUR AI PREFERENCES" : `QUESTION ${surveyStep + 1} OF ${interviewerQuestions.length}`}</span></header><main><section className="interviewer-card"><div className="interviewer-presence"><span className="interviewer-orb">✦</span><span><strong>AgentForge Interviewer</strong><small>{complete ? "One last choice before we begin" : question.required ? "Listening · required question" : "Listening · optional question"}</small></span></div>{complete ? <><span className="eyebrow">YOU CONTROL THE INTERACTION</span><h1>How should Ask AI work with you?</h1><p>These preferences change how answers are presented. You can change them inside Ask AI at any time.</p><InteractionPreferencePicker responseLength={responseLength} interactionMode={interactionMode} onLength={setResponseLength} onMode={setInteractionMode} />{error && <p className="entry-error">{error}</p>}<div className="draft-state" data-state={draftStatus}>{draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft could not be saved" : "Your answers are saved as you continue"}</div><div className="entry-survey-actions"><button className="text-button" onClick={previousSurvey}>← Previous</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const payload = { answers: interviewerQuestions.map((item, index) => ({ id: item.id, value: answers[index] || "" })), responseLength, interactionMode }; const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Your interview could not be saved."); if (current) onComplete({ ...current, onboardingCompleted: true, responseLength, interactionMode }); } catch (problem) { setError(problem instanceof Error ? problem.message : "Your interview could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving your profile…" : "Enter Participant Portal →"}</button></div></> : <><span className="eyebrow">GETTING TO KNOW HOW YOU LEARN</span><h1>{question.prompt}</h1><p>{question.helper}</p>{question.example && <p className="interviewer-example">{question.example}</p>}{question.choices && <div className="interviewer-choices">{question.choices.map((choice) => <button type="button" key={choice} className={answer === choice ? "selected" : ""} onClick={() => { setAnswer(choice); interviewInput.current?.focus(); }}>{choice}</button>)}</div>}<textarea ref={interviewInput} autoFocus rows={4} value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void continueSurvey(); } }} placeholder={question.placeholder} /><div className="draft-state" data-state={draftStatus}>{draftStatus === "loading" ? "Checking for a saved draft…" : draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Saved" : draftStatus === "error" ? "Could not save—try Next again" : "Changes save when you continue"}</div><div className="entry-survey-actions"><button className="text-button" disabled={surveyStep === 0} onClick={previousSurvey}>← Previous</button><button className="text-button save-exit" onClick={async () => { const nextAnswers = [...answers]; nextAnswers[surveyStep] = answer.trim(); await saveDraft(nextAnswers, surveyStep); await endSession(); window.location.reload(); }}>Save & continue later</button>{!question.required && <button className="text-button" onClick={() => { setAnswer(""); void continueSurvey(); }}>Skip for now</button>}<small>Press Enter or choose Next</small><button className="primary" disabled={question.required && !answer.trim()} onClick={() => void continueSurvey()}>Next →</button></div></>}</section><aside className="interviewer-progress"><span>YOUR PROFILE · RAW SELF-REPORT</span><p>Your words remain separate from future AI inference.</p>{interviewerQuestions.map((item, index) => <div className={index < answers.length ? "filled" : index === surveyStep ? "active" : ""} key={item.id}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item.id.replaceAll("_", " ")}<small>{index < answers.length ? answers[index] ? answers[index].slice(0, 55) : "Skipped for now" : index === surveyStep ? item.required ? "Current · required" : "Current · optional" : item.required ? "Required" : "Optional"}</small></span></div>)}</aside></main></div>;
+  return <div className="entry-survey interviewer-entry" style={visualStyle} onMouseMove={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); setPointer({ x: ((event.clientX - bounds.left) / bounds.width) * 100, y: ((event.clientY - bounds.top) / bounds.height) * 100 }); }}><div className="interviewer-atmosphere" aria-hidden="true"><i /><i /><i /><i /></div><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>PARTICIPANT INTERVIEW</small></span></div><span>{complete ? "YOUR AI PREFERENCES" : `QUESTION ${surveyStep + 1} OF ${interviewerQuestions.length}`}</span></header><main><section className="interviewer-card"><div className="interviewer-presence"><span className="interviewer-orb">✦</span><span><strong>AgentForge Interviewer</strong><small>{complete ? "One last choice before we begin" : question.required ? "Listening · required question" : "Listening · optional question"}</small></span></div>{complete ? <><span className="eyebrow">YOU CONTROL THE INTERACTION</span><h1>How should Ask AI work with you?</h1><p>These preferences change how answers are presented. You can change them inside Ask AI at any time.</p><InteractionPreferencePicker responseLength={responseLength} interactionMode={interactionMode} onLength={setResponseLength} onMode={setInteractionMode} />{error && <p className="entry-error">{error}</p>}<div className="draft-state" data-state={draftStatus}>{draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft could not be saved" : "Your answers are saved as you continue"}</div><div className="entry-survey-actions"><button className="text-button" onClick={previousSurvey}>← Previous</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const payload = { answers: interviewerQuestions.map((item, index) => ({ id: item.id, value: answers[index] || "" })), responseLength, interactionMode }; const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Your interview could not be saved."); if (current) { const completed = { ...current, onboardingCompleted: true, responseLength, interactionMode }; setCurrent(completed); setStage("orientation"); } } catch (problem) { setError(problem instanceof Error ? problem.message : "Your interview could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving your profile…" : "Continue to FEVI orientation →"}</button></div></> : <><span className="eyebrow">GETTING TO KNOW HOW YOU LEARN</span><h1>{question.prompt}</h1><p>{question.helper}</p>{question.example && <p className="interviewer-example">{question.example}</p>}{question.choices && <div className="interviewer-choices">{question.choices.map((choice) => <button type="button" key={choice} className={answer === choice ? "selected" : ""} onClick={() => { setAnswer(choice); interviewInput.current?.focus(); }}>{choice}</button>)}</div>}<textarea ref={interviewInput} autoFocus rows={4} value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void continueSurvey(); } }} placeholder={question.placeholder} /><div className="draft-state" data-state={draftStatus}>{draftStatus === "loading" ? "Checking for a saved draft…" : draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Saved" : draftStatus === "error" ? "Could not save—try Next again" : "Changes save when you continue"}</div><div className="entry-survey-actions"><button className="text-button" disabled={surveyStep === 0} onClick={previousSurvey}>← Previous</button><button className="text-button save-exit" onClick={async () => { const nextAnswers = [...answers]; nextAnswers[surveyStep] = answer.trim(); await saveDraft(nextAnswers, surveyStep); await endSession(); window.location.reload(); }}>Save & continue later</button>{!question.required && <button className="text-button" onClick={() => { setAnswer(""); void continueSurvey(); }}>Skip for now</button>}<small>Press Enter or choose Next</small><button className="primary" disabled={question.required && !answer.trim()} onClick={() => void continueSurvey()}>Next →</button></div></>}</section><aside className="interviewer-progress"><span>YOUR PROFILE · RAW SELF-REPORT</span><p>Your words remain separate from future AI inference.</p>{interviewerQuestions.map((item, index) => <div className={index < answers.length ? "filled" : index === surveyStep ? "active" : ""} key={item.id}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item.id.replaceAll("_", " ")}<small>{index < answers.length ? answers[index] ? answers[index].slice(0, 55) : "Skipped for now" : index === surveyStep ? item.required ? "Current · required" : "Current · optional" : item.required ? "Required" : "Optional"}</small></span></div>)}</aside></main></div>;
 }
 
 type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
@@ -418,30 +445,17 @@ export function HackathonPortal() {
   const [perspectiveReady, setPerspectiveReady] = useState(false);
   const [pendingAccount, setPendingAccount] = useState<PortalUser | null>(null);
   const [entryReady, setEntryReady] = useState(false);
-  const [done, setDone] = useState<number[]>([]);
   const [assistant, setAssistant] = useState(false);
   const [assistantOpened, setAssistantOpened] = useState(false);
   const [assistantWorking, setAssistantWorking] = useState(false);
   const [viewRestored, setViewRestored] = useState(false);
   const [assistantContext, setAssistantContext] = useState("");
   const [selectionAction, setSelectionAction] = useState<SelectionAction>(null);
+  const [selectionCoachVisible, setSelectionCoachVisible] = useState(false);
   const [assistantDraft, setAssistantDraft] = useState<{ text: string; nonce: number } | undefined>();
-  const [surveyStep, setSurveyStep] = useState(0);
-  const [answer, setAnswer] = useState("");
-  const [surveyAnswers, setSurveyAnswers] = useState<string[]>([]);
-  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
-  const [selectedMilestone, setSelectedMilestone] = useState<number | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [publishedAnnouncements, setPublishedAnnouncements] = useState<PublishedAnnouncement[]>([]);
   const [announcementHistoryOpen, setAnnouncementHistoryOpen] = useState(false);
-  const progress = Math.round((done.length / milestones.length) * 100);
-  const surveyQuestions = [
-    "What recurring problem in your life would you most like an agent to solve?",
-    "How do you handle this today, and where does the workflow break down?",
-    "What information may the agent access—and what must stay off limits?",
-    "What observable result would prove the agent is useful?",
-    "What should the agent remember between sessions?",
-  ];
 
   useEffect(() => {
     let cancelled = false;
@@ -453,7 +467,7 @@ export function HackathonPortal() {
         const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "bootstrap" }) });
         const result = await response.json() as { account?: PortalUser };
         if (!response.ok || !result.account || cancelled) return;
-        if (result.account.role === "organizer" || (result.account.consentVersion !== "pending" && Boolean(result.account.onboardingCompleted))) setPortalUser(result.account);
+        if (result.account.role === "organizer" || (result.account.consentVersion !== "pending" && Boolean(result.account.onboardingCompleted) && Boolean(result.account.orientationCompleted))) setPortalUser(result.account);
         else setPendingAccount(result.account);
       } finally { if (!cancelled) setEntryReady(true); }
     };
@@ -483,7 +497,7 @@ export function HackathonPortal() {
   }, []);
 
   useEffect(() => {
-    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
+    const validViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "admin", "eventAdmin", "settings", "policy"];
     const requested = window.location.hash.replace(/^#\/?/, "") || window.localStorage.getItem("agentforge_current_view") || "home";
     const restoreTimer = window.setTimeout(() => { if (validViews.includes(requested as View)) setView(requested as View); setViewRestored(true); }, 0);
     const restoreFromHistory = () => {
@@ -518,8 +532,14 @@ export function HackathonPortal() {
   }, []);
 
   useEffect(() => {
+    if (!portalUser) return;
+    const timer = window.setTimeout(() => setSelectionCoachVisible(window.localStorage.getItem("agentforge_selection_coach_seen") !== "true"), 0);
+    return () => window.clearTimeout(timer);
+  }, [portalUser]);
+
+  useEffect(() => {
     const dismissSelectionAction = (event: MouseEvent) => {
-      if (!(event.target as HTMLElement | null)?.closest(".selection-ask-action")) setSelectionAction(null);
+      if (!(event.target as HTMLElement | null)?.closest(".selection-context-menu")) setSelectionAction(null);
     };
     const dismissOnScroll = () => setSelectionAction(null);
     const dismissOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setSelectionAction(null); };
@@ -537,26 +557,11 @@ export function HackathonPortal() {
 
   const participantSurface = portalUser?.role !== "organizer" || organizerParticipantMode;
 
-  useEffect(() => {
-    if (!portalUser || !participantSurface) return;
-    const load = async () => {
-      try {
-        const response = await fetch("/api/progress");
-        const result = await response.json() as { events?: Array<{ milestone: string; status: string }> };
-        if (!response.ok) return;
-        const latest = new Map<string, string>();
-        for (const event of result.events || []) latest.set(event.milestone, event.status);
-        setDone(milestones.map((item, index) => latest.get(item[0]) === "completed" || latest.get(item[0]) === "verified" ? index : -1).filter((index) => index >= 0));
-      } catch { /* Progress remains interactive during a temporary network failure. */ }
-    };
-    void load();
-  }, [portalUser, participantSurface]);
-
   function openAssistant() { setAssistantOpened(true); setAssistant(true); }
 
   function offerSelectedContext(target: EventTarget | null) {
     if (view === "admin" || view === "eventAdmin") return;
-    if ((target as HTMLElement | null)?.closest("input, textarea, button, a, .assistant, .selection-ask-action")) return;
+    if ((target as HTMLElement | null)?.closest("input, textarea, button, a, .assistant, .selection-context-menu")) return;
     const selection = window.getSelection();
     const selected = selection?.toString().trim() || "";
     if (selected.length <= 2 || !selection?.rangeCount) {
@@ -572,6 +577,24 @@ export function HackathonPortal() {
     setSelectionAction({ text: selected.slice(0, 4000), left, top });
   }
 
+  function completeSelectionCoach() {
+    window.localStorage.setItem("agentforge_selection_coach_seen", "true");
+    setSelectionCoachVisible(false);
+  }
+
+  async function saveSelectedNote() {
+    if (!selectionAction || selectionAction.status === "saving") return;
+    const selected = selectionAction;
+    setSelectionAction({ ...selected, status: "saving" });
+    try {
+      const response = await fetch("/api/learning-center", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: selected.text, selectedText: selected.text, sourceType: "selection", sourcePage: title }) });
+      if (!response.ok) throw new Error("The note could not be saved.");
+      setSelectionAction({ ...selected, status: "saved" });
+      completeSelectionCoach();
+      window.dispatchEvent(new CustomEvent("agentforge-learner-note-saved"));
+    } catch { setSelectionAction({ ...selected, status: "error" }); }
+  }
+
   async function openClawMaxFromNavigation() {
     try {
       const response = await fetch("/api/clawmax/enrollments", { method: "POST" });
@@ -585,23 +608,7 @@ export function HackathonPortal() {
     }
   }
 
-  const title = useMemo(() => view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview", [view]);
-
-  async function toggleMilestone(index: number) {
-    const completed = !done.includes(index);
-    setDone((current) => completed ? [...current, index] : current.filter((item) => item !== index));
-    try {
-      const response = await fetch("/api/progress", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ milestone: milestones[index][0], status: completed ? "completed" : "started" }) });
-      if (!response.ok) throw new Error();
-    } catch { setDone((current) => completed ? current.filter((item) => item !== index) : [...current, index]); }
-  }
-
-  function nextSurvey() {
-    if (!answer.trim()) return;
-    setSurveyAnswers((items) => [...items, answer.trim()]);
-    setAnswer("");
-    setSurveyStep((step) => Math.min(step + 1, surveyQuestions.length));
-  }
+  const title = view === "companyBrainTutorial" ? "Company Brain Tutorial" : view === "team" ? "Team Space" : view === "model" ? "My Learning Model" : view === "data" ? "My Data" : view === "policy" ? "Data Policy & Consent" : view === "eventAdmin" ? "Event Management" : view === "admin" ? "Organizer View" : nav.find((item) => item.id === view)?.label ?? "Overview";
 
   function enterPortal(user: PortalUser) {
     setPortalUser(user);
@@ -629,7 +636,7 @@ export function HackathonPortal() {
 
   useEffect(() => {
     if (!portalUser || !perspectiveReady) return;
-    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "cogneeTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
+    const participantViews: View[] = ["home", "onboarding", "learn", "clawmaxTutorial", "companyBrainTutorial", "progress", "coach", "demo", "team", "model", "data", "settings", "policy"];
     const organizerViews: View[] = ["admin", "eventAdmin"];
     const showingParticipant = portalUser.role !== "organizer" || organizerParticipantMode;
     const allowed = showingParticipant ? participantViews : organizerViews;
@@ -657,13 +664,13 @@ export function HackathonPortal() {
           {nav.map((item) => (
             <button key={item.id} className={`${view === item.id ? "nav-item active" : "nav-item"}${item.id === "progress" || item.id === "demo" ? " mobile-core" : ""}`} onClick={() => setView(item.id)}>
               <Icon>{item.icon}</Icon>{item.label}
-              {item.id === "progress" && <span className="nav-badge">{done.length}/{milestones.length}</span>}
             </button>
           ))}
-          <p className="nav-label">TEAM SPACE</p>
-          <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Space<span className="status-dot on" /></button>
+          <p className="nav-label">YOUR LEARNING RECORD</p>
           <button className={view === "model" ? "nav-item active" : "nav-item"} onClick={() => setView("model")}><Icon>⌬</Icon>Learning Model</button>
           <button className={view === "data" ? "nav-item active" : "nav-item"} onClick={() => setView("data")}><Icon>▦</Icon>My Data</button>
+          <p className="nav-label secondary-nav-label">TEAM COLLABORATION</p>
+          <button className={view === "team" ? "nav-item active" : "nav-item"} onClick={() => setView("team")}><Icon>♧</Icon>Shared Space<span className="status-dot on" /></button>
           <button className="nav-item clawmax-nav-link" onClick={() => void openClawMaxFromNavigation()} title="Open the event ClawMax workspace in a new tab"><Icon>↗</Icon>Open ClawMax</button>
           {portalUser.role === "organizer" && <><p className="nav-label">DEMO CONTROLS</p><button className="nav-item perspective-switch return" onClick={returnToOrganizer}><Icon>←</Icon>Return to Organizer</button></>}
           </> : <><p className="nav-label">ORGANIZER CONTROL ROOM</p>
@@ -684,19 +691,19 @@ export function HackathonPortal() {
           <div><p>{(eventConfig?.eventName || "Personal Agent Hackathon").toUpperCase()}</p><h1>{title}</h1></div>
           <div className="top-actions"><span className={`role-chip ${organizerParticipantMode ? "demo" : ""}`}>{organizerParticipantMode ? "PARTICIPANT DEMO" : portalUser.role === "organizer" ? "ORGANIZER PORTAL" : "PARTICIPANT PORTAL"}</span><span className="connection"><i /> Systems connected</span>{organizerParticipantMode && <button className="perspective-return-top" onClick={returnToOrganizer}>Return to Organizer</button>}{participantSurface && <button className="ask-button" onClick={openAssistant}>✦ Ask AI</button>}</div>
         </header>
-        {eventConfig?.announcementActive && eventConfig.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
+        {Boolean(eventConfig?.announcementActive) && eventConfig?.announcementText && <div className="global-announcement" role="status"><span>EVENT ANNOUNCEMENT</span><p>{eventConfig.announcementText}</p><small>{eventConfig.announcementUpdatedAt ? `Updated ${new Date(Number(eventConfig.announcementUpdatedAt)).toLocaleString()}` : "Organizer broadcast"}</small><button type="button" onClick={() => setAnnouncementHistoryOpen(true)} aria-haspopup="dialog">View history →</button></div>}
         {organizerParticipantMode && <div className="participant-demo-banner"><div><strong>Organizer participant demo</strong><span>You are using your real organizer account inside the participant experience. Create or join a shared demo team to rehearse the live workflow.</span></div><button onClick={returnToOrganizer}>Exit demo mode</button></div>}
 
         <section className="content">
-          {view === "home" && <Overview progress={progress} setView={setView} />}
+          {selectionCoachVisible && participantSurface && view === "home" && <aside className="selection-coach" aria-label="Text selection tutorial"><div className="selection-coach-orbit" aria-hidden="true"><i /><i /><span>✦</span></div><div><span className="eyebrow">TRY ASK AI IN CONTEXT</span><strong>Select the sentence below, then choose what to do.</strong><p className="selection-practice-line">What should my agent remember, what should it verify, and where should I stay in control?</p><small>Highlighting only opens a small menu. Ask AI will never interrupt you automatically.</small></div><button type="button" aria-label="Dismiss text selection tutorial" onClick={completeSelectionCoach}>×</button></aside>}
+          {view === "home" && <Overview setView={setView} />}
           {view === "onboarding" && (
-            <AgentCanvas surveyStep={surveyStep} questions={surveyQuestions} answer={answer} setAnswer={setAnswer} next={nextSurvey} answers={surveyAnswers} savedProjectId={savedProjectId} onSaved={(id) => { setSavedProjectId(id); setDone((items) => items.includes(0) ? items : [...items, 0]); setSelectedMilestone(0); setView("progress"); }} />
+            <AgentCanvas onOpenClawMax={() => void openClawMaxFromNavigation()} />
           )}
           {view === "learn" && <LearningCenter setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} setView={setView} />}
           {view === "clawmaxTutorial" && <ClawMaxTutorial onOpen={() => void openClawMaxFromNavigation()} />}
-          {view === "cogneeTutorial" && <CogneeTutorial setAssistant={(open) => { if (open) openAssistant(); else setAssistant(false); }} />}
           {view === "companyBrainTutorial" && <CompanyBrainTutorial onBack={() => setView("learn")} onAsk={(text, context) => { setAssistantContext(context); setAssistantDraft({ text, nonce: Date.now() }); openAssistant(); }} />}
-          {view === "progress" && <Progress milestones={milestones} done={done} toggle={toggleMilestone} progress={progress} selected={selectedMilestone} setSelected={setSelectedMilestone} />}
+          {view === "progress" && <Progress />}
           {view === "coach" && <PromptCoach />}
           {view === "demo" && <Demo />}
           {view === "team" && <TeamSpace />}
@@ -709,7 +716,7 @@ export function HackathonPortal() {
         </section>
       </main>
 
-      {selectionAction && participantSurface && <button type="button" className="selection-ask-action" style={{ left: selectionAction.left, top: selectionAction.top }} onMouseDown={(event) => event.preventDefault()} onClick={() => { setAssistantContext(selectionAction.text); setSelectionAction(null); openAssistant(); }}><span>✦</span> Ask Agent about this</button>}
+      {selectionAction && participantSurface && <div className="selection-context-menu" style={{ left: selectionAction.left, top: selectionAction.top }} onMouseDown={(event) => event.preventDefault()} role="dialog" aria-label="Actions for selected text">{selectionAction.status === "saved" ? <><span className="selection-saved">✓ Saved to Learner Center</span><button type="button" onClick={() => { setSelectionAction(null); setView("learn"); }}>Open →</button></> : <><button type="button" onClick={() => { setAssistantContext(selectionAction.text); setSelectionAction(null); completeSelectionCoach(); openAssistant(); }}><span>✦</span>Ask AI</button><button type="button" disabled={selectionAction.status === "saving"} onClick={() => void saveSelectedNote()}><span>▤</span>{selectionAction.status === "saving" ? "Saving…" : selectionAction.status === "error" ? "Try Notes again" : "Take Notes"}</button></>}</div>}
       {assistantOpened && <div className={assistant ? "assistant-mounted" : "assistant-mounted hidden"}><Assistant close={() => setAssistant(false)} page={title} selectedContext={assistantContext} draft={assistantDraft} /></div>}
       {assistantOpened && !assistant && <button className={`assistant-minimized ${assistantWorking ? "working" : ""}`} onClick={() => setAssistant(true)} aria-label={assistantWorking ? "AI is still thinking. Reopen assistant" : "Reopen AI Assistant"}><span className="assistant-mini-orb">✦</span><span><strong>{assistantWorking ? "AI is thinking…" : "AI Assistant"}</strong><small>{assistantWorking ? "You can keep working" : "Click to reopen"}</small></span></button>}
       {announcementHistoryOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setAnnouncementHistoryOpen(false)}><section className="participant-announcement-history" role="dialog" aria-modal="true" aria-labelledby="announcement-history-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">EVENT UPDATES</span><h2 id="announcement-history-title">Published announcements</h2></div><button type="button" onClick={() => setAnnouncementHistoryOpen(false)} aria-label="Close announcement history">×</button></header><div>{publishedAnnouncements.length ? publishedAnnouncements.map((item) => <article key={item.id}><small>{new Date(item.createdAt).toLocaleString()}</small><p>{item.announcementText}</p></article>) : <p className="notes-empty">No earlier published announcements yet.</p>}</div></section></div>}
@@ -717,7 +724,7 @@ export function HackathonPortal() {
   );
 }
 
-function Overview({ progress, setView }: { progress: number; setView: (view: View) => void }) {
+function Overview({ setView }: { setView: (view: View) => void }) {
   const [team, setTeam] = useState<Pick<TeamOverview, "team" | "members" | "memories" | "questions"> | null>(null);
 
   useEffect(() => {
@@ -745,96 +752,225 @@ function Overview({ progress, setView }: { progress: number; setView: (view: Vie
         <div className="hero-actions"><button className="primary" onClick={() => setView("onboarding")}>Continue building <span>→</span></button><button className="text-button" onClick={() => setView("learn")}>Open learning path</button></div>
       </article>
       <article className="pulse-card">
-        <div className="card-heading"><span>YOUR BUILD PULSE</span><b>{progress}%</b></div>
-        <div className="radial" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><small>ON TRACK</small></div></div>
-        <p><b>3 milestones complete.</b><br />Next: connect your Cognee memory.</p>
-        <button onClick={() => setView("progress")}>View progress →</button>
+        <div className="card-heading"><span>RESEARCH CHECK-INS</span><b>3</b></div>
+        <div className="radial evidence-radial"><div><strong>3</strong><small>MOMENTS</small></div></div>
+        <p><b>Brief, optional reflections.</b><br />Capture what changed without interrupting your build.</p>
+        <button onClick={() => setView("progress")}>Open check-ins →</button>
       </article>
     </div>
     <div className="section-title"><div><span>YOUR NEXT MOVES</span><h3>Keep the momentum</h3></div><small>Recommended for your team</small></div>
     <div className="move-grid">
-      <button className="move-card accent-violet" onClick={() => setView("learn")}><span className="move-icon">⌁</span><small>LEARN · 30 MIN</small><h4>Give your agent<br />verifiable memory</h4><p>Remember → Recall → Verify</p><b>Start onboarding →</b></button>
-      <button className="move-card accent-lime" onClick={() => setView("progress")}><span className="move-icon">✓</span><small>BUILD · MILESTONE 04</small><h4>Store your first<br />useful memory</h4><p>Prove recall with one test.</p><b>Open milestone →</b></button>
+      <button className="move-card accent-violet" onClick={() => setView("learn")}><span className="move-icon">⌁</span><small>LEARN · WHEN NEEDED</small><h4>Use a scaffold<br />only when useful</h4><p>Formulate, engage, verify, integrate.</p><b>Open Learner Center →</b></button>
+      <button className="move-card accent-lime" onClick={() => setView("progress")}><span className="move-icon">✓</span><small>REFLECT · UNDER 1 MIN</small><h4>Capture one<br />meaningful episode</h4><p>Record a decision, reason, and confidence.</p><b>Open check-in →</b></button>
       <button className="move-card accent-orange" onClick={() => setView("demo")}><span className="move-icon">◇</span><small>PREP · MIDPOINT</small><h4>Define how you’ll<br />measure success</h4><p>Make improvement visible.</p><b>Create evaluation →</b></button>
     </div>
     <article className="team-strip"><div><span className="team-logo">{teamName?.[0]?.toUpperCase() || "S"}</span><div><small>{teamName || "SHARED SPACE"}</small><h4>{team ? teamName ? "Your shared space is active" : "Create or join a shared space" : "Loading shared space…"}</h4></div></div><div className="team-stats"><span><b>{teamName ? team.members.length : "—"}</b><small>MEMBERS</small></span><span><b>{teamName ? team.memories.length : "—"}</b><small>MEMORIES</small></span><span><b>{teamName ? team.questions.length : "—"}</b><small>QUESTIONS</small></span></div><button onClick={() => setView("team")}>Open shared space →</button></article>
   </>;
 }
 
-function AgentCanvas({ surveyStep, questions, answer, setAnswer, next, answers, savedProjectId, onSaved }: { surveyStep: number; questions: string[]; answer: string; setAnswer: (v: string) => void; next: () => void; answers: string[]; savedProjectId: string | null; onSaved: (id: string) => void }) {
-  const complete = surveyStep >= questions.length;
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+function AgentCanvas({ onOpenClawMax }: { onOpenClawMax: () => void }) {
+  const emptyAnswers = () => Object.fromEntries(agentBlueprintQuestions.map((question) => [question.id, { selections: [], detail: "" }])) as BlueprintAnswers;
+  const [answers, setAnswers] = useState<BlueprintAnswers>(emptyAnswers);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [status, setStatus] = useState<"draft" | "completed">("draft");
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState("");
+  const lastSavedPayload = useRef("");
+  const complete = currentStep >= agentBlueprintQuestions.length;
+  const question = complete ? null : agentBlueprintQuestions[currentStep];
 
-  async function saveCanvas() {
-    if (savedProjectId || saving) return;
-    setSaving(true);
-    setSaveError("");
-    try {
-      let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
-      if (!anonymousParticipantId) {
-        anonymousParticipantId = crypto.randomUUID();
-        sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/canvas", { cache: "no-store" });
+        const result = await response.json() as { blueprint?: { answers?: BlueprintAnswers; currentStep?: number; status?: "draft" | "completed"; projectId?: string | null }; error?: string };
+        if (!response.ok) throw new Error(result.error || "Your saved blueprint could not be loaded.");
+        if (cancelled) return;
+        const restored = { ...emptyAnswers(), ...(result.blueprint?.answers || {}) };
+        setAnswers(restored);
+        setCurrentStep(Math.max(0, Math.min(agentBlueprintQuestions.length, Number(result.blueprint?.currentStep) || 0)));
+        setStatus(result.blueprint?.status || "draft");
+        setProjectId(result.blueprint?.projectId || null);
+        lastSavedPayload.current = JSON.stringify(restored);
+      } catch (problem) {
+        if (!cancelled) setError(problem instanceof Error ? problem.message : "Your saved blueprint could not be loaded.");
+      } finally { if (!cancelled) setHydrated(true); }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const payload = JSON.stringify(answers);
+    if (payload === lastSavedPayload.current) return;
+    setSaveState("saving");
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep, eventType: "draft_autosave", questionId: question?.id || "review" }) });
+        const result = await response.json() as { error?: string };
+        if (!response.ok) throw new Error(result.error || "Draft could not be saved.");
+        lastSavedPayload.current = payload;
+        setSaveState("saved");
+      } catch (problem) {
+        setSaveState("error");
+        setError(problem instanceof Error ? problem.message : "Draft could not be saved.");
       }
-      const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ anonymousParticipantId, answers }) });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [answers, currentStep, hydrated, question?.id]);
+
+  const answerFor = (id: string) => answers[id] || { selections: [], detail: "" };
+  const hasAnswer = (item: BlueprintQuestion) => {
+    const value = answerFor(item.id);
+    if (item.optional) return true;
+    if (item.detailRequired && !value.detail.trim()) return false;
+    return Boolean(value.detail.trim() || value.selections.length);
+  };
+  const summaryFor = (item: BlueprintQuestion) => {
+    const value = answerFor(item.id);
+    return [...value.selections, value.detail.trim()].filter(Boolean).join(" · ");
+  };
+  const updateDetail = (value: string) => {
+    if (!question) return;
+    setStatus("draft");
+    setAnswers((items) => ({ ...items, [question.id]: { ...answerFor(question.id), detail: value } }));
+  };
+  const toggleChoice = (choice: string) => {
+    if (!question) return;
+    const current = answerFor(question.id);
+    const selections = question.multiple ? current.selections.includes(choice) ? current.selections.filter((item) => item !== choice) : [...current.selections, choice] : [choice];
+    setStatus("draft");
+    setAnswers((items) => ({ ...items, [question.id]: { ...current, selections } }));
+  };
+  async function recordEvent(eventType: string, questionId: string, nextStep = currentStep) {
+    try {
+      await fetch("/api/canvas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: nextStep, eventType, questionId }) });
+      lastSavedPayload.current = JSON.stringify(answers);
+      setSaveState("saved");
+    } catch { setSaveState("error"); }
+  }
+  async function continueForward() {
+    if (!question || !hasAnswer(question)) {
+      setError("Add a short answer before continuing. You can change it later.");
+      return;
+    }
+    setError("");
+    const nextStep = Math.min(agentBlueprintQuestions.length, currentStep + 1);
+    await recordEvent("answer_saved", question.id, nextStep);
+    setCurrentStep(nextStep);
+  }
+  async function completeBlueprint() {
+    setSaveState("saving");
+    setError("");
+    try {
+      const response = await fetch("/api/canvas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers, currentStep: agentBlueprintQuestions.length }) });
       const result = await response.json() as { id?: string; error?: string };
-      if (!response.ok || !result.id) throw new Error(result.error || "Canvas could not be saved.");
-      onSaved(result.id);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Canvas could not be saved.");
-    } finally {
-      setSaving(false);
+      if (!response.ok || !result.id) throw new Error(result.error || "Blueprint could not be completed.");
+      setProjectId(result.id);
+      setStatus("completed");
+      setSaveState("saved");
+      lastSavedPayload.current = JSON.stringify(answers);
+    } catch (problem) {
+      setSaveState("error");
+      setError(problem instanceof Error ? problem.message : "Blueprint could not be completed.");
     }
   }
-  return <div className="split-layout">
-    <section className="survey-panel">
-      <span className="eyebrow">AGENT-GUIDED DISCOVERY</span>
-      <h2>{complete ? "Your agent canvas is ready." : "Let’s find the agent worth building."}</h2>
-      <p>{complete ? "Here is the first build brief based on your answers. You can refine it with your team." : "I’ll ask one useful question at a time. Your answers become a practical one-day build plan—not a generic idea."}</p>
-      {!complete ? <div className="question-card">
-        <div className="question-meta"><span>QUESTION {surveyStep + 1} OF {questions.length}</span><span>{Math.round((surveyStep / questions.length) * 100)}%</span></div>
-        <h3>{questions[surveyStep]}</h3>
-        <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); next(); } }} placeholder="Describe a specific moment, not a broad category…" rows={6} />
-        <div className="question-footer"><small>Press Enter to continue. Shift + Enter adds a new line.</small><button className="primary" onClick={next}>Continue →</button></div>
-      </div> : <div className="brief-card"><span>DRAFT BUILD BRIEF</span><h3>Personal knowledge continuity agent</h3><dl><div><dt>Problem</dt><dd>{answers[0]}</dd></div><div><dt>MVP scope</dt><dd>Capture one trusted source, remember it with Cognee, and recall it inside one ClawMax workflow.</dd></div><div><dt>Demo success</dt><dd>{answers[3] || "Complete a repeatable task with measurable improvement."}</dd></div></dl>{saveError && <p className="form-error">{saveError}</p>}<button className="primary" onClick={saveCanvas} disabled={saving || Boolean(savedProjectId)}>{saving ? "Saving…" : savedProjectId ? "Canvas saved" : "Save canvas & start building"}</button></div>}
-    </section>
-    <aside className="canvas-aside"><span>LIVE CANVAS</span><h3>Your brief takes shape here</h3>{["Project idea", "Problem statement", "MVP scope", "Data sources", "Agent architecture", "Cognee memory role", "Demo success criteria"].map((item, i) => <div className={i < answers.length ? "canvas-item filled" : "canvas-item"} key={item}><b>{i < answers.length ? "✓" : i + 1}</b><span>{item}<small>{i < answers.length ? "Captured from your answer" : "Waiting for context"}</small></span></div>)}</aside>
+
+  if (!hydrated) return <div className="agent-design-loading"><span className="brand-mark">A</span><p>Loading your Agent Blueprint…</p></div>;
+
+  return <div className="agent-design-page">
+    <header className="agent-design-intro"><div><span className="eyebrow">PROBLEM DISCOVERY · NOT A PROMPT TEMPLATE</span><h2>Design the problem before the agent.</h2><p>Answer one question at a time. Your choices become a live blueprint you can revise before opening ClawMax.</p></div><div className={`blueprint-save-state ${saveState}`}><i />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : saveState === "saved" ? "Saved" : "Autosave ready"}</div></header>
+    <details className="inspiration-drawer"><summary><span><b>Need inspiration?</b> Browse use cases without copying a full prompt.</span><small>Optional · opens the source Google Doc ↗</small></summary><div className="inspiration-grid">{inspirationCases.map(([category, title]) => <a key={title} href={useCaseDocumentUrl} target="_blank" rel="noreferrer"><small>{category}</small><strong>{title}</strong><span>Open reference ↗</span></a>)}</div></details>
+    <div className="agent-design-workspace">
+      <section className="agent-design-question" aria-live="polite">
+        {!complete && question ? <>
+          <div className="blueprint-progress"><span>GUIDING QUESTION {currentStep + 1} OF {agentBlueprintQuestions.length}</span><b>{Math.round(((currentStep + 1) / agentBlueprintQuestions.length) * 100)}%</b></div>
+          <div className="blueprint-progress-track"><i style={{ width: `${((currentStep + 1) / agentBlueprintQuestions.length) * 100}%` }} /></div>
+          <span className="question-section-label">{question.label}{question.optional ? " · OPTIONAL" : ""}</span>
+          <h3>{question.prompt}</h3><p>{question.helper}</p>
+          <div className={`blueprint-choice-grid ${question.multiple ? "multiple" : "single"}`}>{question.choices.map((choice) => { const selected = answerFor(question.id).selections.includes(choice); return <button type="button" key={choice} className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => toggleChoice(choice)}><span>{selected ? "✓" : "+"}</span>{choice}</button>; })}</div>
+          <label className="blueprint-detail-label">{question.detailLabel}<textarea autoFocus rows={5} value={answerFor(question.id).detail} onChange={(event) => updateDetail(event.target.value)} placeholder={question.placeholder} /></label>
+          <details className="blueprint-example" onToggle={(event) => { if (event.currentTarget.open) void recordEvent("example_opened", question.id); }}><summary>I need an example</summary><p>{question.example}</p><small>Use the structure, not the wording. Your own situation is the useful evidence.</small></details>
+          {error && <p className="form-error">{error}</p>}
+          <footer className="agent-design-actions"><button className="text-button" disabled={currentStep === 0} onClick={() => { setError(""); setCurrentStep((step) => Math.max(0, step - 1)); }}>← Previous</button><span>You can edit every answer from the Blueprint.</span><button className="primary" onClick={() => void continueForward()}>{currentStep === agentBlueprintQuestions.length - 1 ? "Review blueprint →" : "Next question →"}</button></footer>
+        </> : <div className="blueprint-review"><span className="eyebrow">READY FOR YOUR REVIEW</span><h3>Your first Agent Blueprint is assembled.</h3><p>This is still your draft. Read the evidence on the right, edit anything that feels generic, then save it as your project starting point.</p><div className="blueprint-review-checks"><span>✓ A concrete problem</span><span>✓ A bounded workflow</span><span>✓ Human review points</span><span>✓ A visible success test</span></div>{error && <p className="form-error">{error}</p>}<div className="blueprint-review-actions"><button className="text-button" onClick={() => setCurrentStep(agentBlueprintQuestions.length - 1)}>← Edit last answer</button><button className="primary" disabled={saveState === "saving"} onClick={() => void completeBlueprint()}>{saveState === "saving" ? "Saving blueprint…" : status === "completed" ? "Save updated blueprint" : "Save Agent Blueprint"}</button></div>{status === "completed" && <div className="blueprint-complete"><div><b>Blueprint saved</b><span>Project {projectId?.slice(0, 8)}… is ready to build.</span></div><button type="button" onClick={onOpenClawMax}>Open ClawMax to build ↗</button></div>}</div>}
+      </section>
+      <aside className="agent-blueprint-live"><header><div><span className="eyebrow">PARTICIPANT AGENT BLUEPRINT</span><h3>Your design, in your words.</h3></div><small>{agentBlueprintQuestions.filter((item) => summaryFor(item)).length}/{agentBlueprintQuestions.length} sections</small></header><div>{agentBlueprintQuestions.map((item, index) => { const summary = summaryFor(item); return <article key={item.id} className={summary ? "filled" : currentStep === index ? "active" : ""}><div><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{item.label}</strong><p>{summary || (item.optional ? "Optional — not defined" : "Waiting for your answer")}</p></span></div><button type="button" onClick={() => { setError(""); setCurrentStep(index); void recordEvent("answer_revisited", item.id, index); }}>{summary ? "Edit" : "Add"}</button></article>; })}</div><footer><strong>This is not a generated prompt.</strong><span>It is a participant-authored record of the problem, boundaries, workflow, and test.</span></footer></aside>
+    </div>
   </div>;
 }
 
+type LearnerNote = { id: string; content: string; selectedText?: string | null; sourceType: "manual" | "selection" | "assistant"; sourcePage?: string | null; sourcePromptEventId?: string | null; createdAt: number; updatedAt: number };
+type LearnerPrompt = { id: string; page: string; tutorialStep?: string | null; userPrompt: string; responseText?: string | null; status: string; userFeedback?: string | null; createdAt: number };
+
+function LearnerNoteCard({ note, onUpdated }: { note: LearnerNote; onUpdated: (note: LearnerNote) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState(note.content);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    if (!content.trim()) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/learning-center", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ noteId: note.id, content }) });
+      const result = await response.json() as { note?: { updatedAt: number }; error?: string };
+      if (!response.ok || !result.note) throw new Error(result.error || "Note could not be updated.");
+      onUpdated({ ...note, content: content.trim(), updatedAt: result.note.updatedAt }); setEditing(false);
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Note could not be updated."); }
+    finally { setSaving(false); }
+  }
+  return <article className={`learner-note-card ${note.sourceType}`}><header><span>{note.sourceType === "selection" ? "SELECTED TEXT" : note.sourceType === "assistant" ? "ASK AI NOTE" : "PERSONAL NOTE"}</span><small>{note.sourcePage ? `${note.sourcePage} · ` : ""}{new Date(note.updatedAt).toLocaleString()}</small></header>{note.selectedText && note.selectedText !== note.content && <blockquote>{note.selectedText}</blockquote>}{editing ? <div className="learner-note-editor"><textarea rows={5} value={content} onChange={(event) => setContent(event.target.value)} autoFocus />{error && <p className="form-error">{error}</p>}<div><button type="button" onClick={() => { setEditing(false); setContent(note.content); }}>Cancel</button><button type="button" className="primary" disabled={saving || !content.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save note"}</button></div></div> : <><p>{note.content}</p><footer><span>{note.sourcePromptEventId ? "Linked to its original Prompt and response" : "Private to your learning record"}</span><button type="button" onClick={() => setEditing(true)}>Edit</button></footer></>}</article>;
+}
+
 function LearningCenter({ setAssistant, setView }: { setAssistant: (v: boolean) => void; setView: (view: View) => void }) {
-  return <>
-    <div className="page-intro"><div><span className="eyebrow">YOUR HACKATHON LEARNING HUB</span><h2>Learn only what you need to build.</h2><p>Start with the tool you need now, then return to the build path below. Each tutorial is designed around something your team can demonstrate—not passive reading.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></div>
-    <section className="fevi-participant-guide"><header><div><span className="eyebrow">HOW TO THINK WHILE BUILDING</span><h3>FEVI keeps you in control of the AI.</h3></div><p>This is a learning scaffold—not a grade or a measure of intelligence.</p></header><div>{[["F","Formulate","Define your goal, useful context, constraints, and what success looks like."],["E","Engage","Ask for the kind of help you need: a hint, explanation, critique, comparison, or plan."],["V","Verify","Check important claims, sources, logic, code, and assumptions before relying on them."],["I","Integrate","Choose what to accept, change, or reject—and explain the reason in your own words."]].map(([letter,title,text]) => <article key={letter}><b>{letter}</b><div><strong>{title}</strong><p>{text}</p></div></article>)}</div><footer><strong>A good result is not enough by itself.</strong><span>Keep evidence of what you checked and why you made the final decision.</span></footer></section>
-    <section className="tutorial-library company-brain-library" aria-label="Tutorial library">
-      <button className="tutorial-library-card clawmax" onClick={() => setView("clawmaxTutorial")}>
-        <span className="library-mark">C</span><span className="library-status pending">WAITING FOR MAX</span>
-        <small>CLAWMAX · OFFICIAL MATERIALS PENDING</small><h3>Build your ClawMax agent</h3>
-        <p>This space will contain the verified setup and agent-building walkthrough once Max provides the official material.</p>
-        <b>Open placeholder →</b>
-      </button>
-      <button className="tutorial-library-card cognee" onClick={() => setView("cogneeTutorial")}>
-        <span className="library-mark">◎</span><span className="library-status available">ONBOARDING DEMO</span>
-        <small>COGNEE · OFFICIAL DOCS GUIDED PATH</small><h3>Build memory you can actually verify</h3>
-        <p>Learn the current Remember and Recall workflow, then understand where Add, Cognify, Search, sessions, REST, and MCP fit.</p>
-        <b>Start Cognee onboarding →</b>
-      </button>
-      <button className="tutorial-library-card cognee" onClick={() => setView("companyBrainTutorial")}>
-        <span className="library-mark">CB</span><span className="library-status available">3 BUILD EXERCISES</span>
-        <small>COMPANY BRAIN · COGNEE + CLAWMAX</small><h3>Build with shared knowledge</h3>
-        <p>Build a GTM brief, prospect researcher, or purchase-order workflow. Formulate, Engage, Verify, and Integrate—with practical Ask AI questions.</p>
-        <b>Open Company Brain tutorial →</b>
-      </button>
-    </section>
-    <section className="tutor-team-note">
-      <div className="tutor-team-icon">✦</div>
-      <div><span className="eyebrow">PROPOSED CLAWMAX AGENTIC TUTOR TEAM</span><h3>Help participants learn sponsor tools while they build.</h3><p>A team of ClawMax tutor agents could answer step-specific questions, explain ClawMax and Cognee concepts, recommend the next tutorial, and pass unresolved issues—with page and project context—to a human mentor.</p></div>
-      <aside><span>MEETING WITH MAX</span><b>Confirm capabilities, tool access, escalation rules, and how tutor agents should improve from participant feedback.</b></aside>
-    </section>
-    <div className="learning-section-title"><div><span className="eyebrow">RECOMMENDED BUILD PATH</span><h3>From idea to measurable improvement</h3></div><p>These lessons will unlock as the real platform records completed tutorial steps and build evidence.</p></div>
-    <div className="learning-layout"><section className="lesson-list">{lessons.map((lesson, i) => <article className="lesson" key={lesson.n}><span className={`lesson-number ${lesson.color}`}>{lesson.n}</span><div><small>{lesson.meta}</small><h3>{lesson.title}</h3><div className="lesson-bar"><i style={{ width: i === 0 ? "100%" : i === 1 ? "54%" : "0%" }} /></div></div><button disabled={lesson.status === "Locked"} onClick={() => lesson.n === "02" ? setView("clawmaxTutorial") : lesson.n === "03" ? setView("cogneeTutorial") : undefined}>{lesson.status} {lesson.status !== "Locked" && "→"}</button></article>)}</section>
-    <aside className="memory-loop"><span>HOW TO USE THIS CENTER</span><h3>Learn, build, prove.</h3>{["Open the tutorial for your current step", "Try the task in your own project", "Save evidence in Build Progress", "Ask AI when you get stuck", "Return after feedback and improve"].map((item, i) => <div key={item}><b>{i + 1}</b><span>{item}</span>{i < 4 && <i>↓</i>}</div>)}<a href="https://docs.cognee.ai" target="_blank" rel="noreferrer">Open official Cognee docs ↗</a></aside></div>
-  </>;
+  const [tab, setTab] = useState<"notes" | "questions" | "tutorials">("notes");
+  const [notes, setNotes] = useState<LearnerNote[]>([]);
+  const [prompts, setPrompts] = useState<LearnerPrompt[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/learning-center", { cache: "no-store" });
+        const result = await response.json() as { notes?: LearnerNote[]; prompts?: LearnerPrompt[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "Your learning record could not be loaded.");
+        if (!cancelled) { setNotes(result.notes || []); setPrompts(result.prompts || []); setError(""); }
+      } catch (problem) { if (!cancelled) setError(problem instanceof Error ? problem.message : "Your learning record could not be loaded."); }
+      finally { if (!cancelled) setLoading(false); }
+    }
+    const refresh = () => void load();
+    void load(); window.addEventListener("agentforge-learner-note-saved", refresh);
+    return () => { cancelled = true; window.removeEventListener("agentforge-learner-note-saved", refresh); };
+  }, []);
+  async function addNote() {
+    if (!draft.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/learning-center", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: draft, sourceType: "manual", sourcePage: "Learner Center" }) });
+      const result = await response.json() as { note?: LearnerNote; error?: string };
+      if (!response.ok || !result.note) throw new Error(result.error || "The note could not be saved.");
+      setNotes((current) => [result.note!, ...current]); setDraft("");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "The note could not be saved."); }
+    finally { setBusy(false); }
+  }
+  const successfulPrompts = prompts.filter((item) => item.status === "success" && item.responseText);
+  const pages = [...new Set(prompts.map((item) => item.page).filter(Boolean))].slice(0, 5);
+  return <div className="learner-center-page">
+    <section className="learner-center-hero"><div><span className="eyebrow">YOUR PRIVATE LEARNING RECORD</span><h2>See the thinking behind your agent.</h2><p>Keep selected passages, your own notes, and earlier Ask AI exchanges together. Shared Space remains available for deliberate team collaboration; nothing here is shared automatically.</p></div><button className="outline-button" onClick={() => setAssistant(true)}>✦ Ask about this page</button></section>
+    <section className="learner-center-summary"><article><strong>{notes.length}</strong><span>Personal notes</span></article><article><strong>{prompts.length}</strong><span>Questions asked</span></article><article><strong>{successfulPrompts.length}</strong><span>Responses recorded</span></article><div><small>RECENT LEARNING CONTEXT</small><p>{pages.length ? pages.join(" · ") : "Your pages and topics will appear as you work."}</p></div></section>
+    <nav className="learner-center-tabs" aria-label="Learner Center sections">{([ ["notes", "My Notes"], ["questions", "Ask AI History"], ["tutorials", "Tutorials & FEVI"] ] as const).map(([id, label]) => <button type="button" key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</nav>
+    {error && <p className="form-error">{error}</p>}
+    {tab === "notes" && <section className="learner-notes-layout"><div className="personal-note-composer"><span className="eyebrow">CAPTURE YOUR REASONING</span><h3>Write a note in your own words.</h3><textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="What did you notice, question, verify, or decide?" /><footer><small>Private by default · you can also highlight text anywhere and choose Take Notes.</small><button className="primary" disabled={busy || !draft.trim()} onClick={() => void addNote()}>{busy ? "Saving…" : "Save note"}</button></footer></div><div className="learner-note-list">{loading ? <p className="notes-empty">Loading your notes…</p> : notes.length ? notes.map((note) => <LearnerNoteCard key={note.id} note={note} onUpdated={(updated) => setNotes((current) => current.map((item) => item.id === updated.id ? updated : item))} />) : <div className="learner-empty"><b>▤</b><h3>No notes yet.</h3><p>Highlight a useful sentence on any participant page and choose Take Notes, or write your first reflection here.</p></div>}</div></section>}
+    {tab === "questions" && <section className="learner-prompt-history">{loading ? <p className="notes-empty">Restoring your Ask AI history…</p> : prompts.length ? prompts.map((item) => <details key={item.id}><summary><div><small>{item.page}{item.tutorialStep ? ` · ${item.tutorialStep}` : ""} · {new Date(item.createdAt).toLocaleString()}</small><strong>{item.userPrompt}</strong><p>{item.responseText ? `${item.responseText.slice(0, 220)}${item.responseText.length > 220 ? "…" : ""}` : item.status === "success" ? "No response text was recorded." : `Request ${item.status}.`}</p></div><span>{item.userFeedback ? item.userFeedback.replaceAll("_", " ") : "Open"}</span></summary><div className="learner-prompt-detail"><span>ASSISTANT RESPONSE</span><p>{item.responseText || "No response was recorded for this request."}</p><small>This is raw interaction evidence, not a grade or an AI inference about you.</small></div></details>) : <div className="learner-empty"><b>✦</b><h3>No Ask AI history yet.</h3><p>Use the assistant from any page. Your question, page context, response, and feedback will appear here.</p></div>}</section>}
+    {tab === "tutorials" && <><section className="fevi-participant-guide"><header><div><span className="eyebrow">HOW TO THINK WHILE BUILDING</span><h3>FEVI keeps you in control of the AI.</h3></div><p>This is a learning scaffold—not a grade or a measure of intelligence.</p></header><div>{[["F","Formulate","Define your goal, useful context, constraints, and what success looks like."],["E","Engage","Ask for the kind of help you need: a hint, explanation, critique, comparison, or plan."],["V","Verify","Check important claims, sources, logic, code, and assumptions before relying on them."],["I","Integrate","Choose what to accept, change, or reject—and explain the reason in your own words."]].map(([letter,title,text]) => <article key={letter}><b>{letter}</b><div><strong>{title}</strong><p>{text}</p></div></article>)}</div><footer><strong>A good result is not enough by itself.</strong><span>Keep evidence of what you checked and why you made the final decision.</span></footer></section><section className="tutorial-library company-brain-library" aria-label="Tutorial library"><button className="tutorial-library-card clawmax" onClick={() => setView("clawmaxTutorial")}><span className="library-mark">C</span><span className="library-status pending">WAITING FOR MAX</span><small>CLAWMAX · OFFICIAL MATERIALS PENDING</small><h3>Build your ClawMax agent</h3><p>This space will contain the verified setup and agent-building walkthrough once Max provides the official material.</p><b>Open placeholder →</b></button><button className="tutorial-library-card cognee" onClick={() => setView("companyBrainTutorial")}><span className="library-mark">CB</span><span className="library-status available">3 BUILD EXERCISES</span><small>COMPANY BRAIN · CLAWMAX</small><h3>Build with shared knowledge</h3><p>Build a GTM brief, prospect researcher, or purchase-order workflow. Formulate, Engage, Verify, and Integrate—with practical Ask AI questions.</p><b>Open Company Brain tutorial →</b></button></section></>}
+  </div>;
 }
 
 function ClawMaxTutorial({ onOpen }: { onOpen: () => void }) {
@@ -853,6 +989,8 @@ function ClawMaxTutorial({ onOpen }: { onOpen: () => void }) {
   </div>;
 }
 
+// Kept temporarily as inactive source while the Learning Center is being rebuilt.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => void }) {
   const [step, setStep] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -958,11 +1096,64 @@ function LegacyCogneeTutorial({ setAssistant }: { setAssistant: (v: boolean) => 
   </>;
 }
 
-function Progress({ milestones: items, done, toggle, progress, selected, setSelected }: { milestones: readonly (readonly [string, string])[]; done: number[]; toggle: (i: number) => void; progress: number; selected: number | null; setSelected: (i: number | null) => void }) {
-  return <><div className="page-intro"><div><span className="eyebrow">BUILD CHECKPOINTS</span><h2>Turn a busy day into visible progress.</h2><p>Check items manually now. Connected events can verify them automatically later.</p></div><div className="progress-total"><strong>{progress}%</strong><span><i style={{ width: `${progress}%` }} /></span><small>{done.length} of {items.length} complete</small></div></div>
-  <div className="milestone-grid">{items.map(([name, detail], i) => <button key={name} className={done.includes(i) ? "milestone done" : "milestone"} onClick={() => setSelected(i)}><span className="check">{done.includes(i) ? "✓" : i + 1}</span><span><small>MILESTONE {String(i + 1).padStart(2, "0")}</small><h3>{name}</h3><p>{detail}</p></span><b>{done.includes(i) ? "Verified" : "Open →"}</b></button>)}</div>
-  {selected !== null && <div className="milestone-backdrop" onClick={() => setSelected(null)}><aside className="milestone-detail" onClick={(event) => event.stopPropagation()}><header><span>MILESTONE {String(selected + 1).padStart(2, "0")}</span><button onClick={() => setSelected(null)}>×</button></header><div className="detail-status">{done.includes(selected) ? "✓ COMPLETED" : "NEXT CHECKPOINT"}</div><h2>{items[selected][0]}</h2><p>{items[selected][1]}</p><section><h3>Definition of done</h3><ul><li>You can show concrete evidence for this checkpoint.</li><li>A teammate can repeat or verify the result.</li><li>You recorded what worked and what still needs attention.</li></ul></section><section><h3>Evidence</h3><textarea rows={4} placeholder="Add a test result, link, note, or screenshot description…" /></section><div className="detail-actions"><button className="outline-button" onClick={() => setSelected(null)}>Close</button><button className="primary" onClick={() => { toggle(selected); setSelected(null); }}>{done.includes(selected) ? "Mark incomplete" : "Mark complete"}</button></div></aside></div>}
-  </>;
+type LearningCheckin = { id: string; checkpointType: "baseline" | "episode_reflection" | "transfer"; stage: string; scaffoldLevel: "explicit" | "light" | "minimal"; responseJson: string; createdAt: number };
+
+function ConfidenceScale({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return <div className="confidence-scale" role="group" aria-label="Confidence from 1 to 5">{[1, 2, 3, 4, 5].map((score) => <button type="button" key={score} className={value === score ? "selected" : ""} aria-pressed={value === score} onClick={() => onChange(score)}>{score}</button>)}</div>;
+}
+
+function Progress() {
+  const [checkins, setCheckins] = useState<LearningCheckin[]>([]);
+  const [goal, setGoal] = useState("");
+  const [successEvidence, setSuccessEvidence] = useState("");
+  const [baselineConfidence, setBaselineConfidence] = useState(3);
+  const [decision, setDecision] = useState("");
+  const [helpfulness, setHelpfulness] = useState("");
+  const [episodeReason, setEpisodeReason] = useState("");
+  const [episodeConfidence, setEpisodeConfidence] = useState(3);
+  const [transferDecision, setTransferDecision] = useState("");
+  const [transferReason, setTransferReason] = useState("");
+  const [transferConfidence, setTransferConfidence] = useState(3);
+  const [saving, setSaving] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/checkins", { cache: "no-store" });
+        const result = await response.json() as { checkins?: LearningCheckin[] };
+        if (!cancelled && response.ok) setCheckins(result.checkins || []);
+      } catch { /* Check-ins remain usable during a temporary read failure. */ }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function saveCheckin(checkpointType: LearningCheckin["checkpointType"], scaffoldLevel: LearningCheckin["scaffoldLevel"], responseData: Record<string, unknown>) {
+    setSaving(checkpointType); setNotice(""); setError("");
+    try {
+      const response = await fetch("/api/checkins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkpointType, scaffoldLevel, stage: "Personal Agent Hackathon", response: responseData }) });
+      const result = await response.json() as { checkin?: LearningCheckin; error?: string };
+      if (!response.ok || !result.checkin) throw new Error(result.error || "This check-in could not be saved.");
+      setCheckins((current) => [result.checkin!, ...current]);
+      setNotice("Saved. This remains a raw participant report, not a score or learner trait.");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "This check-in could not be saved."); }
+    finally { setSaving(""); }
+  }
+
+  const completed = new Set(checkins.map((item) => item.checkpointType));
+  return <div className="evidence-checkins-page">
+    <section className="evidence-checkins-hero"><div><span className="eyebrow">THREE SHORT RESEARCH MOMENTS</span><h2>Capture what changed without interrupting your build.</h2><p>AgentForge records most activity automatically. These check-ins ask only for judgments the log cannot observe: your goal, what you did with advice, and how confident you felt.</p></div><aside><strong>{completed.size}/3</strong><span>optional moments recorded</span><small>No completion grade</small></aside></section>
+    <section className="evidence-boundary"><div><span>RAW EVIDENCE</span><p>Your words, choices, confidence, page context, and time of submission.</p></div><div><span>PROVISIONAL INTERPRETATION</span><p>Researchers may code an episode later, always linked back to its evidence.</p></div><div><span>NOT CLAIMED</span><p>One check-in cannot establish intelligence, motivation, or lasting competence.</p></div></section>
+    {notice && <p className="coach-notice">✓ {notice}</p>}{error && <p className="form-error">{error}</p>}
+    <section className="checkin-list">
+      <article className={completed.has("baseline") ? "checkin-card complete" : "checkin-card"}><header><b>01</b><div><span>BEFORE BUILDING · ABOUT 45 SECONDS</span><h3>Your intended task</h3><p>An explicit scaffold establishes the goal and a success criterion before outside help.</p></div>{completed.has("baseline") && <em>Saved</em>}</header><label>What do you want your agent to accomplish?<textarea rows={3} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Describe one task the agent should complete…" /></label><label>What result would count as evidence that it worked?<textarea rows={2} value={successEvidence} onChange={(event) => setSuccessEvidence(event.target.value)} placeholder="A test, observable result, or comparison…" /></label><div className="checkin-confidence"><span>How confident are you that you can build this now?</span><ConfidenceScale value={baselineConfidence} onChange={setBaselineConfidence} /><small>1 = not yet confident · 5 = very confident</small></div><button className="primary" disabled={saving === "baseline" || !goal.trim() || !successEvidence.trim()} onClick={() => void saveCheckin("baseline", "explicit", { goal: goal.trim(), successEvidence: successEvidence.trim(), confidence: baselineConfidence })}>{saving === "baseline" ? "Saving…" : completed.has("baseline") ? "Save another baseline" : "Save baseline"}</button></article>
+      <article className={completed.has("episode_reflection") ? "checkin-card complete" : "checkin-card"}><header><b>02</b><div><span>AFTER ONE MEANINGFUL AI RESPONSE · ABOUT 30 SECONDS</span><h3>What you did with the advice</h3><p>A light reflection captures decision ownership without asking for a long explanation after every Prompt.</p></div>{completed.has("episode_reflection") && <em>Saved</em>}</header><fieldset><legend>What did you do with the response?</legend><div className="checkin-options">{["Accepted it", "Modified it", "Rejected it", "Did not use it"].map((item) => <button type="button" key={item} className={decision === item ? "selected" : ""} onClick={() => setDecision(item)}>{item}</button>)}</div></fieldset><fieldset><legend>Was the response useful for your next action?</legend><div className="checkin-options">{["Helpful", "Partly helpful", "Not helpful"].map((item) => <button type="button" key={item} className={helpfulness === item ? "selected" : ""} onClick={() => setHelpfulness(item)}>{item}</button>)}</div></fieldset><label>One short reason <small>Optional unless the response was only partly helpful or not helpful</small><textarea rows={2} value={episodeReason} onChange={(event) => setEpisodeReason(event.target.value)} placeholder="Wrong, too long, missing context, unclear next step, or another reason…" /></label><div className="checkin-confidence"><span>How confident are you in your decision?</span><ConfidenceScale value={episodeConfidence} onChange={setEpisodeConfidence} /></div><button className="primary" disabled={saving === "episode_reflection" || !decision || !helpfulness || (helpfulness !== "Helpful" && !episodeReason.trim())} onClick={() => void saveCheckin("episode_reflection", "light", { decision, helpfulness, reason: episodeReason.trim(), confidence: episodeConfidence })}>{saving === "episode_reflection" ? "Saving…" : "Save this episode"}</button></article>
+      <article className={completed.has("transfer") ? "checkin-card transfer complete" : "checkin-card transfer"}><header><b>03</b><div><span>OPTIONAL TRANSFER CHECK · ABOUT 60 SECONDS</span><h3>A new claim with minimal guidance</h3><p>This low-risk probe tests a decision after the earlier scaffold has faded. It stays separate from the help needed to finish your project.</p></div>{completed.has("transfer") && <em>Saved</em>}</header><blockquote>“A personal agent should save every user interaction as permanent memory because more memory always improves personalization.”</blockquote><fieldset><legend>What would you do with this recommendation?</legend><div className="checkin-options">{["Accept", "Modify", "Reject"].map((item) => <button type="button" key={item} className={transferDecision === item ? "selected" : ""} onClick={() => setTransferDecision(item)}>{item}</button>)}</div></fieldset><label>What evidence or principle supports your decision?<textarea rows={3} value={transferReason} onChange={(event) => setTransferReason(event.target.value)} placeholder="Explain the boundary, risk, or test you would use…" /></label><div className="checkin-confidence"><span>How confident are you?</span><ConfidenceScale value={transferConfidence} onChange={setTransferConfidence} /></div><button className="primary" disabled={saving === "transfer" || !transferDecision || !transferReason.trim()} onClick={() => void saveCheckin("transfer", "minimal", { decision: transferDecision, reason: transferReason.trim(), confidence: transferConfidence, probeVersion: "memory-boundary-v1" })}>{saving === "transfer" ? "Saving…" : "Save optional transfer check"}</button></article>
+    </section>
+  </div>;
 }
 
 function Demo() {
@@ -1156,7 +1347,7 @@ type OrganizerData = {
   learningSignals: Array<{ id: string; page: string; tutorialStep?: string; promptCount: number; participantCount: number; errorCount: number; negativeFeedbackCount: number; detectionRule: string; cogneeSummary?: string; suggestedAction?: string; reviewStatus: string; createdAt: number }>;
   promptClusters: Array<{ id: string; page: string; tutorialStep?: string; category: string; label: string; participantLevel: string; promptCount: number; participantCount: number; errorCount: number; examplesJson: string; windowStartedAt: number; windowEndedAt: number; createdAt: number }>;
   signalEvidence: Array<{ signalId: string; promptEventId: string; userPrompt: string; status: string; errorCode?: string; userFeedback?: string; createdAt: number }>;
-  feedbacks: Array<{ id: string; promptEventId: string; participantId: string; teamId?: string | null; participantDisplayName: string; feedback: "helpful" | "not_helpful"; page: string; tutorialStep?: string | null; userPrompt: string; createdAt: number }>;
+  feedbacks: Array<{ id: string; promptEventId: string; participantId: string; teamId?: string | null; participantDisplayName: string; feedback: "helpful" | "partly_helpful" | "not_helpful"; reasonCode?: string | null; note?: string | null; page: string; tutorialStep?: string | null; userPrompt: string; createdAt: number }>;
   promptEvaluations: Array<{ id: string; promptEventId: string; rubricVersion: string; evaluator: string; evaluationJson: string; totalScore?: number | null; createdAt: number; participantId: string; page: string; tutorialStep?: string; userPrompt: string; contextReference?: string; parentPromptEventId?: string; parentPrompt?: string; outcomeStatus?: string; outcomeEvidence?: string }>;
 };
 
@@ -1469,7 +1660,7 @@ function Admin() {
     <section className="learning-signal-live"><div className="table-title"><div><h3>Detected Learning Signals</h3><p>Counts are rule-based SQL facts. Cognee adds an evidence-grounded interpretation only when requested.</p></div></div>{data.learningSignals.length ? data.learningSignals.map((signal) => { const evidence = (data.signalEvidence || []).filter((item) => item.signalId === signal.id); return <article key={signal.id}><div><span className="eyebrow">{signal.reviewStatus}</span><h4>{signal.page} · {signal.tutorialStep || "General page"}</h4><p><b>{signal.promptCount}</b> prompts from <b>{signal.participantCount}</b> participants · {signal.errorCount} errors · {signal.negativeFeedbackCount} negative feedback</p><small>FACTS: calculated by {signal.detectionRule}. These counts are not generated by AI.</small><details className="signal-evidence"><summary>View {evidence.length} linked Prompt examples</summary>{evidence.map((item) => <p key={item.promptEventId}><b>{item.status}</b> {item.userPrompt}</p>)}</details></div><div className="signal-interpretation"><b>COGNEE INTERPRETATION</b><p>{signal.cogneeSummary || "Not generated yet. An organizer may request analysis after evidence has synced."}</p><small>INFERENCE: requires human review and remains linked to the Prompt examples at left.</small>{signal.suggestedAction && <strong>Suggested action: {signal.suggestedAction}</strong>}</div><div className="signal-review-actions"><button className="outline-button" onClick={() => void runCognee("analyze", signal.id)} disabled={Boolean(cogneeAction) || !data.cognee.connected}>{cogneeAction === `analyze:${signal.id}` ? "Analyzing…" : "Analyze with Cognee"}</button><button onClick={() => void reviewSignal(signal.id, "approved")} disabled={signal.reviewStatus === "approved"}>Approve</button><button onClick={() => void reviewSignal(signal.id, "rejected")} disabled={signal.reviewStatus === "rejected"}>Reject</button></div></article>; }) : <div className="empty-live-state"><strong>No learning signal currently crosses the threshold.</strong><p>This is a real empty state—not demo data. Run detection after participants begin asking questions.</p></div>}</section>
     <div className="live-admin-grid"><section className="usage-panel"><div className="table-title"><div><h3>Hourly Token Trend</h3><p>Last 24 recorded hours</p></div></div><div className="usage-bars">{data.hourly.length ? data.hourly.map((item) => { const max = Math.max(...data.hourly.map((point) => Number(point.tokens)), 1); return <div key={item.hour} title={`${item.hour}: ${item.tokens} tokens`}><i style={{ height: `${Math.max(6, Number(item.tokens) / max * 100)}%` }} /><small>{item.hour.slice(11, 16)}</small></div>; }) : <p>No token data yet.</p>}</div></section><section className="usage-panel"><div className="table-title"><div><h3>Usage by Page & Step</h3><p>Where participants ask and fail</p></div></div><div className="compact-rows">{data.pages.map((item) => <div key={`${item.page}-${item.tutorialStep}`}><span><strong>{item.page}</strong><small>{item.tutorialStep || "General page"}</small></span><b>{item.prompts} prompts</b><em>{item.errors} errors</em><small>{Number(item.tokens).toLocaleString()} tokens</small></div>)}</div></section></div>
     <section className="prompt-monitor"><div className="table-title"><div><h3>Recent Prompts</h3><p>Latest 100 · click a row to inspect the masked prompt and response</p></div><span>Protected organizer data</span></div><div className="prompt-table"><div className="prompt-row heading"><span>TIME</span><span>PAGE</span><span>PROMPT</span><span>TOKENS</span><span>STATUS</span></div>{data.prompts.map((item) => <button className="prompt-row" key={item.id} onClick={() => setSelectedPrompt(item)}><span>{new Date(item.createdAt).toLocaleTimeString()}</span><span>{item.page}</span><span>{item.userPrompt}</span><span>{Number(item.inputTokens || 0) + Number(item.outputTokens || 0)}</span><span className={`pill ${item.status === "success" ? "on-track" : "blocked"}`}>{item.status}</span></button>)}</div></section>
-    <section className="feedback-monitor"><div className="table-title"><div><h3>Recent Assistant Feedback</h3><p>Real Helpful / Not helpful events · participant identity will resolve to login accounts when authentication is connected</p></div><span>{data.feedbacks.length} recorded</span></div><div className="feedback-table"><div className="feedback-row heading"><span>TIME</span><span>PARTICIPANT</span><span>PAGE</span><span>PROMPT</span><span>FEEDBACK</span></div>{data.feedbacks.map((item) => <div className="feedback-row" key={item.id}><span>{new Date(item.createdAt).toLocaleString()}</span><span><strong>{item.participantDisplayName}</strong><small title={item.participantId}>{item.participantId.slice(0, 12)}… · {item.teamId || "Unassigned"}</small></span><span>{item.page}<small>{item.tutorialStep || "General page"}</small></span><span>{item.userPrompt}</span><span className={`pill ${item.feedback === "helpful" ? "on-track" : "needs-help"}`}>{item.feedback === "helpful" ? "Helpful" : "Not helpful"}</span></div>)}{!data.feedbacks.length && <p className="notes-empty">No participant feedback has been recorded yet.</p>}</div></section>
+    <section className="feedback-monitor"><div className="table-title"><div><h3>Recent Assistant Feedback</h3><p>Three-level usefulness feedback with an optional explanation; every event stays linked to its response and context.</p></div><span>{data.feedbacks.length} recorded</span></div><div className="feedback-table"><div className="feedback-row heading"><span>TIME</span><span>PARTICIPANT</span><span>PAGE</span><span>PROMPT</span><span>FEEDBACK</span></div>{data.feedbacks.map((item) => <div className="feedback-row" key={item.id}><span>{new Date(item.createdAt).toLocaleString()}</span><span><strong>{item.participantDisplayName}</strong><small title={item.participantId}>{item.participantId.slice(0, 12)}… · {item.teamId || "Unassigned"}</small></span><span>{item.page}<small>{item.tutorialStep || "General page"}</small></span><span>{item.userPrompt}</span><span><b className={`pill ${item.feedback === "helpful" ? "on-track" : "needs-help"}`}>{item.feedback === "helpful" ? "Helpful" : item.feedback === "partly_helpful" ? "Partly helpful" : "Not helpful"}</b>{item.reasonCode && <small>{item.reasonCode.replaceAll("_", " ")}{item.note ? ` · ${item.note}` : ""}</small>}</span></div>)}{!data.feedbacks.length && <p className="notes-empty">No participant feedback has been recorded yet.</p>}</div></section>
     <section className="team-quota-panel"><div className="table-title"><div><h3>Team Usage & Remaining Quota</h3><p>“Unassigned” will be replaced by real team IDs after login and team membership are connected.</p></div></div>{data.teams.map((team) => <div className="team-quota-row" key={team.teamId}><strong>{team.teamId}</strong><span>{team.prompts} prompts</span><div><i style={{ width: `${Math.min(100, Number(team.tokens) / quota * 100)}%` }} /></div><b>{Number(team.tokens).toLocaleString()} used</b><em>{Math.max(0, quota - Number(team.tokens)).toLocaleString()} remaining</em></div>)}</section>
     {selectedPrompt && <div className="milestone-backdrop" onClick={() => setSelectedPrompt(null)}><aside className="prompt-detail" onClick={(event) => event.stopPropagation()}><header><span>PROMPT DETAIL</span><button onClick={() => setSelectedPrompt(null)}>×</button></header><small>{new Date(selectedPrompt.createdAt).toLocaleString()} · {selectedPrompt.page} · {selectedPrompt.modelName}</small><h3>User prompt</h3><p>{selectedPrompt.userPrompt}</p><h3>Assistant response</h3><p>{selectedPrompt.responseText || "No response was recorded."}</p><div className="prompt-facts"><span>{selectedPrompt.inputTokens || 0} input</span><span>{selectedPrompt.outputTokens || 0} output</span><span>{selectedPrompt.latencyMs || 0} ms</span><span>{selectedPrompt.status}</span></div><button className="danger-button" onClick={() => void deletePrompt(selectedPrompt.id)}>Delete this prompt and response</button></aside></div>}
   </>;
@@ -1568,6 +1759,7 @@ type MyDataPayload = {
   prompts: Array<{ id: string; page: string; tutorialStep?: string; userPrompt: string; responseText?: string; modelName?: string; inputTokens?: number; outputTokens?: number; status: string; userFeedback?: string; createdAt: number; memoryStatus?: string; memorySyncedAt?: number }>;
   memory: Array<{ id: string; entryKind: string; category: string; statement: string; sourceType: string; confirmedByParticipant: number; observedAt: number; memoryStatus?: string; memorySyncedAt?: number }>;
   progress: Array<{ id: string; milestone: string; status: string; source: string; occurredAt: number }>;
+  learningCheckins: Array<{ id: string; checkpointType: string; stage: string; scaffoldLevel: string; responseJson: string; createdAt: number }>;
 };
 
 function MyData() {
@@ -1577,9 +1769,7 @@ function MyData() {
   useEffect(() => { const load = async () => { try { const response = await fetch("/api/me"); const result = await response.json() as MyDataPayload & { error?: string }; if (!response.ok) throw new Error(result.error || "Your data could not be loaded."); setData(result); } catch (problem) { setError(problem instanceof Error ? problem.message : "Your data could not be loaded."); } finally { setLoading(false); } }; void load(); }, []);
   if (loading) return <div className="my-data-page"><section className="my-data-hero"><span className="eyebrow">YOUR EVENT RECORD</span><h2>Loading your data…</h2></section></div>;
   if (error || !data) return <div className="my-data-page"><section className="my-data-hero"><span className="eyebrow">YOUR EVENT RECORD</span><h2>We could not load this page.</h2><p>{error}</p></section></div>;
-  const synced = data.prompts.filter((item) => item.memoryStatus === "synced").length + data.memory.filter((item) => item.memoryStatus === "synced").length;
-  const pending = data.prompts.filter((item) => item.memoryStatus === "pending").length + data.memory.filter((item) => item.memoryStatus === "pending").length;
-  return <div className="my-data-page"><section className="my-data-hero"><div><span className="eyebrow">YOUR EVENT RECORD</span><h2>See what AgentForge remembers about your work.</h2><p>This page separates operational Prompt records from participant-model Memory. Cognee delivery status is shown explicitly.</p></div><a className="primary" href="/api/me?download=1" download>Export my data (.json) ↓</a></section><section className="identity-chain"><article><small>USER</small><strong>{data.account.displayName}</strong><span>{data.account.email}</span></article><i>→</i><article><small>EVENT REGISTRATION</small><strong>{data.relationship.eventRegistrationId.slice(0, 8)}…</strong><span>{data.account.role}</span></article><i>→</i><article><small>CONSENT</small><strong>{data.consent[0]?.status || "Not recorded"}</strong><span>{data.consent[0]?.policyVersion || "—"}</span></article><i>→</i><article><small>TEAM</small><strong>{data.account.teamName || "Solo / pending"}</strong><span>{data.account.inviteCode || "No invite code"}</span></article><i>→</i><article><small>PROJECT & EVIDENCE</small><strong>{data.projects.length} project · {data.prompts.length} prompts</strong><span>{synced} synced · {pending} pending</span></article></section><div className="my-data-grid"><section><header><div><span className="eyebrow">RAW OPERATIONAL RECORDS</span><h3>My prompts</h3></div><b>{data.prompts.length}</b></header>{data.prompts.length ? data.prompts.map((item) => <article className="data-record" key={item.id}><div><small>{item.page}{item.tutorialStep ? ` · ${item.tutorialStep}` : ""} · {new Date(item.createdAt).toLocaleString()}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.userPrompt}</strong>{item.responseText && <p>{item.responseText}</p>}<footer><span>{item.status} · {item.modelName || "No model"}</span><span>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output</span></footer></article>) : <p className="notes-empty">No prompts have been recorded for this account yet.</p>}</section><section><header><div><span className="eyebrow">COGNEE-BOUND PARTICIPANT MODEL</span><h3>My memory</h3></div><b>{data.memory.length}</b></header>{data.memory.length ? data.memory.map((item) => <article className="data-record memory-record" key={item.id}><div><small>{item.entryKind.toUpperCase()} · {item.category}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.statement}</strong><footer><span>Source: {item.sourceType}</span><span>{item.confirmedByParticipant ? "Participant-confirmed" : "Not confirmed"}</span></footer></article>) : <p className="notes-empty">No participant-model memory has been recorded yet.</p>}</section></div><section className="data-progress"><header><div><span className="eyebrow">APPEND-ONLY ACTIVITY</span><h3>Progress history</h3></div><b>{data.progress.length}</b></header>{data.progress.slice(0, 20).map((item) => <div key={item.id}><strong>{item.milestone}</strong><span>{item.status} · {item.source}</span><small>{new Date(item.occurredAt).toLocaleString()}</small></div>)}</section><p className="data-retention-note"><strong>Deletion note:</strong> single-record deletion is intentionally not enabled in this phase. The export is live; retention and deletion need a reviewed event policy so shared team evidence and audit history are handled consistently.</p></div>;
+  return <div className="my-data-page"><section className="my-data-hero"><div><span className="eyebrow">YOUR EVENT RECORD</span><h2>See what AgentForge remembers about your work.</h2><p>This page separates raw activity, participant reports, and later interpretation so you can inspect what supports each claim.</p></div><a className="primary" href="/api/me?download=1" download>Export my data (.json) ↓</a></section><section className="identity-chain"><article><small>USER</small><strong>{data.account.displayName}</strong><span>{data.account.email}</span></article><i>→</i><article><small>EVENT REGISTRATION</small><strong>{data.relationship.eventRegistrationId.slice(0, 8)}…</strong><span>{data.account.role}</span></article><i>→</i><article><small>CONSENT</small><strong>{data.consent[0]?.status || "Not recorded"}</strong><span>{data.consent[0]?.policyVersion || "—"}</span></article><i>→</i><article><small>TEAM</small><strong>{data.account.teamName || "Solo / pending"}</strong><span>{data.account.inviteCode || "No invite code"}</span></article><i>→</i><article><small>PROJECT & EVIDENCE</small><strong>{data.projects.length} project · {data.prompts.length} prompts</strong><span>{data.learningCheckins.length} check-ins</span></article></section><div className="my-data-grid"><section><header><div><span className="eyebrow">RAW OPERATIONAL RECORDS</span><h3>My prompts</h3></div><b>{data.prompts.length}</b></header>{data.prompts.length ? data.prompts.map((item) => <article className="data-record" key={item.id}><div><small>{item.page}{item.tutorialStep ? ` · ${item.tutorialStep}` : ""} · {new Date(item.createdAt).toLocaleString()}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.userPrompt}</strong>{item.responseText && <p>{item.responseText}</p>}<footer><span>{item.status} · {item.modelName || "No model"}</span><span>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output</span></footer></article>) : <p className="notes-empty">No prompts have been recorded for this account yet.</p>}</section><section><header><div><span className="eyebrow">PARTICIPANT-CONTROLLED RECORDS</span><h3>My learning model</h3></div><b>{data.memory.length}</b></header>{data.memory.length ? data.memory.map((item) => <article className="data-record memory-record" key={item.id}><div><small>{item.entryKind.toUpperCase()} · {item.category}</small><span className={`memory-state ${item.memoryStatus || "unknown"}`}>{item.memoryStatus || "not queued"}</span></div><strong>{item.statement}</strong><footer><span>Source: {item.sourceType}</span><span>{item.confirmedByParticipant ? "Participant-confirmed" : "Not confirmed"}</span></footer></article>) : <p className="notes-empty">No participant-model records have been created yet.</p>}</section></div><section className="data-progress"><header><div><span className="eyebrow">RAW PARTICIPANT REPORTS</span><h3>My research check-ins</h3></div><b>{data.learningCheckins.length}</b></header>{data.learningCheckins.map((item) => <div key={item.id}><strong>{item.checkpointType.replaceAll("_", " ")}</strong><span>{item.scaffoldLevel} scaffold · {item.stage}</span><small>{new Date(item.createdAt).toLocaleString()}</small></div>)}</section><p className="data-retention-note"><strong>Deletion note:</strong> single-record deletion is intentionally not enabled in this phase. The export is live; retention and deletion need a reviewed event policy so shared team evidence and audit history are handled consistently.</p></div>;
 }
 
 function DataPolicy({ onBack }: { onBack: () => void }) {
@@ -1709,6 +1899,15 @@ const coachingCriteria = [["goal_task_specification", "Goal / task", "Is the cur
 const processCriteria = [["verification", "Verification", "Claim → task-relevant evidence → justified decision"], ["productive_iteration", "Productive iteration", "A response-contingent change in diagnosis, strategy, or evidence"], ["learning_agency", "Learning agency evidence", "Goal ownership, reasoning, help-seeking, decision ownership, and regulation"]] as const;
 
 function PromptCoach() {
+  return <section className="prompt-coach-placeholder" aria-labelledby="prompt-coach-title">
+    <span className="eyebrow">PROMPT COACH</span>
+    <h2 id="prompt-coach-title">Prompt Coach</h2>
+  </section>;
+}
+
+// Preserved temporarily outside the participant experience while Prompt Coach is redesigned.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyPromptCoach() {
   const [items, setItems] = useState<CoachingItem[]>([]);
   const [actions, setActions] = useState<CoachingAction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1799,7 +1998,10 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
   const [history, setHistory] = useState<AssistantHistoryMessage[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [memoryUsed, setMemoryUsed] = useState(false);
-  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "helpful" | "not_helpful" | "error">("idle");
+  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "saving" | "helpful" | "partly_helpful" | "not_helpful" | "error">("idle");
+  const [feedbackChoice, setFeedbackChoice] = useState<"helpful" | "partly_helpful" | "not_helpful" | null>(null);
+  const [feedbackReason, setFeedbackReason] = useState("");
+  const [feedbackNote, setFeedbackNote] = useState("");
   const [responseLength, setResponseLength] = useState<ResponseLength>("brief");
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("guide");
   const preferenceRef = useRef<{ responseLength: ResponseLength; interactionMode: InteractionMode }>({ responseLength: "brief", interactionMode: "guide" });
@@ -1838,7 +2040,7 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
     if (!conversationId.current) conversationId.current = crypto.randomUUID();
     setSubmittedPrompt(promptToSend); setText("");
     setLoading(true); setError(""); setAnswer(""); setUsage(null);
-    setPromptEventId(""); setBrainStatus("idle"); setFeedbackStatus("idle"); setMemoryUsed(false);
+    setPromptEventId(""); setBrainStatus("idle"); setFeedbackStatus("idle"); setFeedbackChoice(null); setFeedbackReason(""); setFeedbackNote(""); setMemoryUsed(false);
     try {
       let anonymousParticipantId = sessionStorage.getItem("agentforge_participant_id");
       if (!anonymousParticipantId) { anonymousParticipantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", anonymousParticipantId); }
@@ -1857,31 +2059,42 @@ function Assistant({ close, page, selectedContext, draft }: { close: () => void;
     }
   }
 
-  async function addToTeamBrain() {
+  async function saveToLearnerCenter() {
     if (!answer || brainStatus === "saving" || brainStatus === "saved") return;
     setBrainStatus("saving");
-    let authorId = sessionStorage.getItem("agentforge_participant_id");
-    if (!authorId) { authorId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", authorId); }
     try {
-      const response = await fetch("/api/team-notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ teamId: "team-synapse-demo", authorId, authorName: "Yuxin Ren", content: `Question: ${submittedPrompt}\n\n${answer}`, sourceType: "assistant", sourcePromptEventId: promptEventId }) });
+      const response = await fetch("/api/learning-center", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: `Question: ${submittedPrompt}\n\nResponse summary:\n${answer}`, sourceType: "assistant", sourcePage: page, sourcePromptEventId: promptEventId }) });
       if (!response.ok) throw new Error("Note could not be saved.");
       setBrainStatus("saved");
+      window.dispatchEvent(new CustomEvent("agentforge-learner-note-saved"));
     } catch { setBrainStatus("error"); }
   }
 
-  async function saveFeedback(feedback: "helpful" | "not_helpful") {
+  async function saveFeedback(feedback: "helpful" | "partly_helpful" | "not_helpful", reasonCode?: string, note?: string) {
     if (!promptEventId || feedbackStatus === "saving") return;
     let participantId = sessionStorage.getItem("agentforge_participant_id");
     if (!participantId) { participantId = crypto.randomUUID(); sessionStorage.setItem("agentforge_participant_id", participantId); }
     setFeedbackStatus("saving");
     try {
-      const response = await fetch("/api/assistant", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptEventId, anonymousParticipantId: participantId, anonymousTeamId: "team-synapse-demo", participantDisplayName: sessionStorage.getItem("agentforge_participant_name") || "Prototype participant", feedback }) });
+      const response = await fetch("/api/assistant", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promptEventId, feedback, reasonCode, note }) });
       if (!response.ok) throw new Error("Feedback could not be saved.");
       setFeedbackStatus(feedback);
+      setFeedbackChoice(feedback);
     } catch { setFeedbackStatus("error"); }
   }
 
   const visibleHistory = history.filter((item) => item.id !== promptEventId);
   const hasConversation = visibleHistory.length > 0 || Boolean(submittedPrompt);
-  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><details className="assistant-preferences"><summary><span>Response style</span><b>{responseLength} · {interactionMode}</b></summary><InteractionPreferencePicker compact responseLength={responseLength} interactionMode={interactionMode} onLength={(value) => void savePreferences(value, preferenceRef.current.interactionMode)} onMode={(value) => void savePreferences(preferenceRef.current.responseLength, value)} /><small className={preferenceStatus === "error" ? "error" : ""}>{preferenceStatus === "saving" ? "Saving…" : preferenceStatus === "saved" ? "Saved" : preferenceStatus === "error" ? "Could not save" : "Change this at any time"}</small></details><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Recalling relevant Cognee memory, then answering.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "NO MATCHING MEMORY"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}<div><button className={feedbackStatus === "helpful" ? "feedback-selected" : ""} onClick={() => void saveFeedback("helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "helpful" ? "✓ Helpful" : "Helpful"}</button><button className={feedbackStatus === "not_helpful" ? "feedback-selected negative" : ""} onClick={() => void saveFeedback("not_helpful")} disabled={feedbackStatus === "saving"}>{feedbackStatus === "not_helpful" ? "✓ Not helpful" : "Not helpful"}</button><button onClick={() => void addToTeamBrain()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Added to shared space" : brainStatus === "error" ? "Try adding again" : "＋ Add to shared space"}</button></div>{feedbackStatus === "saving" && <small className="feedback-confirmation">Saving feedback…</small>}{feedbackStatus === "error" && <small className="feedback-confirmation error">Feedback was not saved. Please try again.</small>}{(feedbackStatus === "helpful" || feedbackStatus === "not_helpful") && <small className="feedback-confirmation">Feedback saved and linked to this response.</small>}</div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll start small, use your preferred response style, and give you a clear next step. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored from Prompt Tracking. Never paste credentials.</small></footer></aside></div>;
+  const feedbackReasons = [
+    ["incorrect", "Incorrect"],
+    ["too_long", "Too long"],
+    ["missing_context", "Missing context"],
+    ["not_relevant", "Not relevant"],
+    ["unclear_next_step", "Unclear next step"],
+    ["other", "Other"],
+  ] as const;
+  const feedbackControl = <div className="assistant-feedback-control"><div className="feedback-choice-row">{([
+    ["helpful", "Helpful"], ["partly_helpful", "Partly helpful"], ["not_helpful", "Not helpful"],
+  ] as const).map(([value, label]) => <button key={value} className={feedbackChoice === value || feedbackStatus === value ? `feedback-selected${value === "not_helpful" ? " negative" : value === "partly_helpful" ? " partial" : ""}` : ""} disabled={feedbackStatus === "saving" || ["helpful", "partly_helpful", "not_helpful"].includes(feedbackStatus)} onClick={() => { if (value === "helpful") void saveFeedback(value); else { setFeedbackChoice(value); setFeedbackStatus("idle"); } }}>{feedbackStatus === value ? `✓ ${label}` : label}</button>)}</div>{(feedbackChoice === "partly_helpful" || feedbackChoice === "not_helpful") && feedbackStatus !== feedbackChoice && <div className="feedback-followup"><strong>What was the main issue?</strong><div className="feedback-reason-chips">{feedbackReasons.map(([value, label]) => <button type="button" key={value} className={feedbackReason === value ? "selected" : ""} onClick={() => setFeedbackReason(value)}>{label}</button>)}</div><textarea rows={2} maxLength={500} value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="Add a short note (optional)" /><div><button className="feedback-save" disabled={!feedbackReason || feedbackStatus === "saving"} onClick={() => void saveFeedback(feedbackChoice, feedbackReason, feedbackNote)}>Save feedback</button><button onClick={() => { setFeedbackChoice(null); setFeedbackReason(""); setFeedbackNote(""); }}>Cancel</button></div></div>}{feedbackStatus === "saving" && <small className="feedback-confirmation">Saving feedback…</small>}{feedbackStatus === "error" && <small className="feedback-confirmation error">Feedback was not saved. Please try again.</small>}{(["helpful", "partly_helpful", "not_helpful"] as const).includes(feedbackStatus as "helpful" | "partly_helpful" | "not_helpful") && <small className="feedback-confirmation">Feedback saved and linked to this response.</small>}</div>;
+  return <div className="assistant-backdrop"><aside className="assistant"><header><div><span className="assistant-mark">✦</span><span><strong>Build Assistant</strong><small>OpenAI · Cognee memory · Prompt tracked</small></span></div><button onClick={close}>×</button></header><details className="assistant-preferences"><summary><span>Response style</span><b>{responseLength} · {interactionMode}</b></summary><InteractionPreferencePicker compact responseLength={responseLength} interactionMode={interactionMode} onLength={(value) => void savePreferences(value, preferenceRef.current.interactionMode)} onMode={(value) => void savePreferences(preferenceRef.current.responseLength, value)} /><small className={preferenceStatus === "error" ? "error" : ""}>{preferenceStatus === "saving" ? "Saving…" : preferenceStatus === "saved" ? "Saved" : preferenceStatus === "error" ? "Could not save" : "Change this at any time"}</small></details><div className="assistant-context"><span>{selectedContext ? "SELECTED CONTEXT" : "CURRENT PAGE"}</span><p>{selectedContext ? `“${selectedContext.slice(0, 180)}${selectedContext.length > 180 ? "…" : "”"}` : page}</p><small>Highlight different text on the page to replace this context.</small></div><div className={`assistant-chat ${hasConversation ? "has-messages" : ""}`}>{historyLoading && <small className="history-status">Restoring conversation…</small>}{visibleHistory.map((item) => <div className="history-turn" key={item.id}><div className="user-message"><small>YOU · {new Date(item.createdAt).toLocaleString()}</small><p>{item.userPrompt}</p></div>{item.responseText ? <div className="answer historical"><small>OPENAI · {item.modelName || "Assistant"} · {item.page}</small><p>{item.responseText}</p><em>{item.inputTokens ?? "—"} input · {item.outputTokens ?? "—"} output tokens</em></div> : <div className="assistant-error historical"><strong>Request failed</strong><p>{item.errorCode || "No answer was recorded."}</p></div>}</div>)}{submittedPrompt && <div className="user-message"><small>YOU</small><p>{submittedPrompt}</p></div>}{loading ? <div className="assistant-loading"><span className="assistant-mark large">✦</span><h3>Thinking…</h3><p>Recalling relevant Cognee memory, then answering.</p></div> : error ? <div className="assistant-error"><strong>Couldn’t connect</strong><p>{error}</p><button onClick={() => { setText(submittedPrompt); setSubmittedPrompt(""); setError(""); }}>Edit and retry</button></div> : answer ? <div className="answer"><small>OPENAI · {usage?.model} · {memoryUsed ? "COGNEE MEMORY USED" : "NO MATCHING MEMORY"}</small><p>{answer}</p>{usage && <em>{usage.inputTokens ?? "—"} input · {usage.outputTokens ?? "—"} output tokens</em>}{feedbackControl}<div><button onClick={() => void saveToLearnerCenter()} disabled={brainStatus === "saving" || brainStatus === "saved"}>{brainStatus === "saving" ? "Saving…" : brainStatus === "saved" ? "✓ Saved to Learner Center" : brainStatus === "error" ? "Try saving again" : "＋ Save to Learner Center"}</button></div></div> : !hasConversation && !historyLoading ? <><span className="assistant-mark large">✦</span><h3>What would you like to understand?</h3><p>I’ll start small, use your preferred response style, and give you a clear next step. Don’t include API keys or sensitive information.</p></> : null}</div><footer><textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }} placeholder="Ask a follow-up…" rows={3} /><button onClick={() => void ask()} disabled={loading || !text.trim()}>↑</button><small>Conversation history is restored in Learner Center. Never paste credentials.</small></footer></aside></div>;
 }

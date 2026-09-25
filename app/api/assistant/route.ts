@@ -245,7 +245,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const input = await request.json() as { promptEventId?: string; anonymousParticipantId?: string; anonymousTeamId?: string; participantDisplayName?: string; feedback?: string };
+  const input = await request.json() as { promptEventId?: string; feedback?: string; reasonCode?: string; note?: string };
   const promptEventId = input.promptEventId?.trim().slice(0, 100) || "";
   const runtime = env as unknown as { DB: D1Database };
   const auth = await requireCurrentAccount(request, runtime.DB);
@@ -253,16 +253,20 @@ export async function PATCH(request: Request) {
   const participantId = auth.account!.participantId;
   const teamId = auth.account!.teamId;
   const displayName = auth.account!.displayName;
-  const feedback = input.feedback === "helpful" || input.feedback === "not_helpful" ? input.feedback : null;
+  const feedback = input.feedback === "helpful" || input.feedback === "partly_helpful" || input.feedback === "not_helpful" ? input.feedback : null;
+  const allowedReasons = new Set(["incorrect", "too_long", "missing_context", "not_relevant", "unclear_next_step", "other"]);
+  const reasonCode = input.reasonCode && allowedReasons.has(input.reasonCode) ? input.reasonCode : null;
+  const note = input.note?.trim().slice(0, 500) || null;
   if (!promptEventId || !feedback) return Response.json({ error: "Prompt and valid feedback are required." }, { status: 400 });
+  if (feedback !== "helpful" && !reasonCode) return Response.json({ error: "Choose one short reason for partly or not helpful feedback." }, { status: 400 });
   const prompt = await runtime.DB.prepare("SELECT id, anonymous_team_id AS teamId FROM prompt_events WHERE id=? AND anonymous_participant_id=?").bind(promptEventId, participantId).first<{ id: string; teamId: string | null }>();
   if (!prompt) return Response.json({ error: "This response does not belong to the current participant." }, { status: 404 });
   const createdAt = Date.now();
   const feedbackEventId = crypto.randomUUID();
   await runtime.DB.batch([
     runtime.DB.prepare(`INSERT INTO assistant_feedback_events
-      (id,prompt_event_id,anonymous_participant_id,anonymous_team_id,participant_display_name,feedback,created_at)
-      VALUES (?,?,?,?,?,?,?)`).bind(feedbackEventId, promptEventId, participantId, prompt.teamId || teamId, displayName, feedback, createdAt),
+      (id,prompt_event_id,anonymous_participant_id,anonymous_team_id,participant_display_name,feedback,reason_code,note,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(feedbackEventId, promptEventId, participantId, prompt.teamId || teamId, displayName, feedback, reasonCode, note, createdAt),
     runtime.DB.prepare("UPDATE prompt_events SET user_feedback=? WHERE id=? AND anonymous_participant_id=?").bind(feedback, promptEventId, participantId),
     runtime.DB.prepare(`INSERT INTO cognee_sync_outbox
       (id,source_type,source_id,dataset_name,payload_json,status,attempts,created_at)
@@ -271,10 +275,10 @@ export async function PATCH(request: Request) {
         schema_version: "agentforge.memory.v2", event_type: "assistant_feedback",
         feedback_event_id: feedbackEventId, prompt_event_id: promptEventId,
         participant_id: participantId, team_id: prompt.teamId || teamId,
-        participant_display_name: displayName, feedback,
+        participant_display_name: displayName, feedback, reason_code: reasonCode, note,
         occurred_at: new Date(createdAt).toISOString(), evidence_type: "participant_reported_fact",
       }), createdAt),
   ]);
   waitUntil(syncPendingMemory(runtime as AssistantRuntime, 20));
-  return Response.json({ saved: true, feedback, createdAt });
+  return Response.json({ saved: true, feedback, reasonCode, createdAt });
 }
