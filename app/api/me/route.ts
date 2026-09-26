@@ -5,8 +5,24 @@ export async function GET(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
   if (auth.error) return auth.error;
   const account = auth.account!;
-  const [consent, projects, blueprint, blueprintEvents, prompts, feedback, memory, progress, checkins, learnerNotes, authoredNotes, clawmaxConnections, clawmaxEvents] = await Promise.all([
+  const [consent, profile, profileRevisions, interviewEvents, researchEpisodes, researchEpisodeEvents, projects, blueprint, blueprintEvents, prompts, feedback, memory, progress, checkins, learnerNotes, authoredNotes, clawmaxConnections, clawmaxEvents] = await Promise.all([
     env.DB.prepare("SELECT id,policy_version AS policyVersion,status,choices_json AS choicesJson,recorded_at AS recordedAt FROM consent_records WHERE event_participant_id=? ORDER BY recorded_at DESC").bind(account.participantId).all(),
+    env.DB.prepare(`SELECT onboarding_version AS onboardingVersion,answers_json AS answersJson,response_length AS responseLength,
+      interaction_mode AS interactionMode,completed_at AS completedAt,updated_at AS updatedAt
+      FROM participant_onboarding_profiles WHERE participant_id=?`).bind(account.participantId).first(),
+    env.DB.prepare(`SELECT id,answers_json AS answersJson,response_length AS responseLength,interaction_mode AS interactionMode,
+      change_source AS changeSource,created_at AS createdAt FROM participant_onboarding_revisions
+      WHERE participant_id=? ORDER BY created_at DESC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,event_type AS eventType,question_id AS questionId,question_version AS questionVersion,
+      prompt_text AS promptText,required,source,branch_rule AS branchRule,answer_value AS answerValue,
+      model_name AS modelName,input_tokens AS inputTokens,output_tokens AS outputTokens,created_at AS createdAt
+      FROM participant_interview_events WHERE participant_id=? ORDER BY created_at ASC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,episode_type AS episodeType,scaffold_level AS scaffoldLevel,fevi_stage AS feviStage,
+      source_page AS sourcePage,source_prompt_event_id AS sourcePromptEventId,status,stimulus_json AS stimulusJson,
+      response_json AS responseJson,started_at AS startedAt,submitted_at AS submittedAt,created_at AS createdAt
+      FROM research_episodes WHERE participant_id=? ORDER BY created_at ASC`).bind(account.participantId).all(),
+    env.DB.prepare(`SELECT id,research_episode_id AS researchEpisodeId,event_type AS eventType,metadata_json AS metadataJson,occurred_at AS occurredAt
+      FROM research_episode_events WHERE participant_id=? ORDER BY occurred_at ASC`).bind(account.participantId).all(),
     env.DB.prepare("SELECT id,title,problem,success_criteria AS successCriteria,status,created_at AS createdAt,updated_at AS updatedAt FROM agent_projects WHERE anonymous_participant_id=? ORDER BY updated_at DESC").bind(account.participantId).all(),
     env.DB.prepare(`SELECT blueprint_version AS blueprintVersion,answers_json AS answersJson,current_step AS currentStep,status,
       project_id AS projectId,created_at AS createdAt,updated_at AS updatedAt,completed_at AS completedAt
@@ -20,7 +36,7 @@ export async function GET(request: Request) {
     env.DB.prepare(`SELECT m.id,m.entry_kind AS entryKind,m.category,m.statement,m.source_type AS sourceType,m.confidence_percent AS confidencePercent,m.confirmed_by_participant AS confirmedByParticipant,m.observed_at AS observedAt,
       c.status AS memoryStatus,c.synced_at AS memorySyncedAt FROM participant_model_entries m LEFT JOIN cognee_sync_outbox c ON c.source_type='participant_model' AND c.source_id=m.id WHERE m.anonymous_participant_id=? ORDER BY m.observed_at DESC`).bind(account.participantId).all(),
     env.DB.prepare("SELECT id,milestone,status,source,occurred_at AS occurredAt FROM event_progress_events WHERE event_participant_id=? ORDER BY occurred_at DESC").bind(account.participantId).all(),
-    env.DB.prepare(`SELECT id,checkpoint_type AS checkpointType,stage,prompt_event_id AS promptEventId,
+    env.DB.prepare(`SELECT id,research_episode_id AS researchEpisodeId,checkpoint_type AS checkpointType,stage,prompt_event_id AS promptEventId,
       scaffold_level AS scaffoldLevel,response_json AS responseJson,created_at AS createdAt
       FROM learning_checkins WHERE event_participant_id=? ORDER BY created_at DESC`).bind(account.participantId).all(),
     env.DB.prepare(`SELECT id,content,selected_text AS selectedText,source_type AS sourceType,source_page AS sourcePage,
@@ -40,6 +56,11 @@ export async function GET(request: Request) {
     account,
     relationship: { userId: account.userId, eventRegistrationId: account.participantId, eventId: account.eventId, teamId: account.teamId },
     consent: consent.results,
+    onboardingProfile: profile ? { ...profile, answers: JSON.parse(String(profile.answersJson || "[]")), answersJson: undefined } : null,
+    onboardingRevisions: profileRevisions.results.map((revision) => ({ ...revision, answers: JSON.parse(String(revision.answersJson || "[]")), answersJson: undefined })),
+    interviewEvents: interviewEvents.results,
+    researchEpisodes: researchEpisodes.results,
+    researchEpisodeEvents: researchEpisodeEvents.results,
     projects: projects.results,
     agentBlueprint: blueprint.results,
     agentDesignEvents: blueprintEvents.results,

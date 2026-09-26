@@ -13,6 +13,7 @@ type CanvasInput = {
   scaffoldAction?: string;
   supportLevel?: string;
   feviStage?: string;
+  researchEpisodeId?: string;
 };
 
 const BLUEPRINT_VERSION = "agentforge-agent-blueprint-v1";
@@ -80,18 +81,19 @@ export async function PATCH(request: Request) {
   const answers = cleanAnswers(input.answers);
   const currentStep = Math.max(0, Math.min(questionIds.length, Number(input.currentStep) || 0));
   const now = Date.now();
-  const existing = await env.DB.prepare("SELECT created_at AS createdAt,project_id AS projectId,status FROM agent_design_blueprints WHERE event_participant_id=?")
-    .bind(auth.account!.participantId).first<{ createdAt: number; projectId: string | null; status: "draft" | "completed" }>();
+  const existing = await env.DB.prepare("SELECT created_at AS createdAt,project_id AS projectId,status,answers_json AS answersJson FROM agent_design_blueprints WHERE event_participant_id=?")
+    .bind(auth.account!.participantId).first<{ createdAt: number; projectId: string | null; status: "draft" | "completed"; answersJson: string }>();
   const requestedEvent = cleanText(input.eventType, 40);
   const scaffoldOpened = requestedEvent === "scaffold_opened";
   const eventType = scaffoldOpened ? "answer_revisited" : allowedEvents.has(requestedEvent) ? requestedEvent : "draft_autosave";
   const nextStatus = eventType === "draft_autosave" || eventType === "answer_saved" ? "draft" : existing?.status || "draft";
+  const serializedAnswers = serializeAnswers(answers, input.selectedUseCaseId);
   await env.DB.prepare(`INSERT INTO agent_design_blueprints
     (event_participant_id,event_id,team_id,blueprint_version,answers_json,current_step,status,project_id,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(event_participant_id) DO UPDATE SET team_id=excluded.team_id,blueprint_version=excluded.blueprint_version,
       answers_json=excluded.answers_json,current_step=excluded.current_step,status=excluded.status,updated_at=excluded.updated_at`)
-    .bind(auth.account!.participantId, auth.account!.eventId, auth.account!.teamId, BLUEPRINT_VERSION, serializeAnswers(answers, input.selectedUseCaseId), currentStep, nextStatus, existing?.projectId || null, existing?.createdAt || now, now).run();
+    .bind(auth.account!.participantId, auth.account!.eventId, auth.account!.teamId, BLUEPRINT_VERSION, serializedAnswers, currentStep, nextStatus, existing?.projectId || null, existing?.createdAt || now, now).run();
   const questionId = cleanText(input.questionId, 80);
   const eventQuestionId = questionIds.find((id) => id === questionId);
   if (eventType !== "draft_autosave") await recordDesignEvent(auth.account!, eventType, questionId, {
@@ -104,6 +106,23 @@ export async function PATCH(request: Request) {
     feviStage: scaffoldOpened ? cleanText(input.feviStage, 30) : undefined,
     selectedUseCaseId: cleanText(input.selectedUseCaseId, 80) || null,
   }, now);
+  const researchEpisodeId = cleanText(input.researchEpisodeId, 100);
+  if (researchEpisodeId && existing?.answersJson !== serializedAnswers) {
+    const linkedEpisode = await env.DB.prepare("SELECT id FROM research_episodes WHERE id=? AND participant_id=?")
+      .bind(researchEpisodeId, auth.account!.participantId).first<{ id: string }>();
+    if (linkedEpisode) {
+      const before = parseAnswers(existing?.answersJson);
+      const changedQuestionIds = questionIds.filter((id) => JSON.stringify(before[id]) !== JSON.stringify(answers[id]));
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO research_episode_events
+          (id,research_episode_id,participant_id,event_type,metadata_json,occurred_at)
+          VALUES (?,?,?,'revision_linked',?,?)`).bind(crypto.randomUUID(), researchEpisodeId, auth.account!.participantId,
+          JSON.stringify({ questionId: questionId || null, eventType, changedQuestionIds, before, after: answers }), now),
+        env.DB.prepare(`UPDATE research_episodes SET status='submitted',submitted_at=COALESCE(submitted_at,?) WHERE id=? AND participant_id=?`)
+          .bind(now, researchEpisodeId, auth.account!.participantId),
+      ]);
+    }
+  }
   return Response.json({ saved: true, currentStep, updatedAt: now });
 }
 

@@ -20,6 +20,7 @@ type AssistantInput = {
     feviStage?: string;
     currentAnswer?: string;
     selectedUseCaseId?: string;
+    researchEpisodeId?: string;
   };
 };
 
@@ -111,7 +112,9 @@ export async function POST(request: Request) {
   await expireStaleReservations(runtime, startedAt);
   const previousRequest = await existingReservation(runtime, requestId);
   if (previousRequest?.status === "completed" && previousRequest.responseText) {
-    return Response.json({ answer: previousRequest.responseText, model: previousRequest.modelName, inputTokens: previousRequest.inputTokens, outputTokens: previousRequest.outputTokens, eventId: previousRequest.promptEventId, duplicate: true });
+    const previousEpisode = await runtime.DB.prepare("SELECT id FROM research_episodes WHERE source_prompt_event_id=? AND participant_id=? ORDER BY created_at DESC LIMIT 1")
+      .bind(previousRequest.promptEventId, participantId).first<{ id: string }>();
+    return Response.json({ answer: previousRequest.responseText, model: previousRequest.modelName, inputTokens: previousRequest.inputTokens, outputTokens: previousRequest.outputTokens, eventId: previousRequest.promptEventId, researchEpisodeId: previousEpisode?.id || null, duplicate: true });
   }
   if (previousRequest && ["reserved", "processing"].includes(previousRequest.status)) {
     return Response.json({ error: "This AI request is already being processed. Please wait for it to finish." }, { status: 409 });
@@ -187,6 +190,11 @@ export async function POST(request: Request) {
   ].join("\n")).slice(0, 12000);
   const requestedAction = ["clarify", "directions", "challenge"].includes(String(input.scaffold?.action)) ? String(input.scaffold?.action) : "";
   const requestedSupport = ["guided", "reduced", "independent", "review"].includes(String(input.scaffold?.supportLevel)) ? String(input.scaffold?.supportLevel) : "";
+  const requestedResearchEpisodeId = String(input.scaffold?.researchEpisodeId || "").trim().slice(0, 100);
+  const existingResearchEpisode = requestedResearchEpisodeId ? await runtime.DB.prepare(
+    "SELECT id FROM research_episodes WHERE id=? AND participant_id=?",
+  ).bind(requestedResearchEpisodeId, participantId).first<{ id: string }>() : null;
+  const researchEpisodeId = existingResearchEpisode?.id || crypto.randomUUID();
   const scaffoldInstruction = !requestedAction ? "" : requestedSupport === "guided"
     ? `This is a guided scaffold request (${requestedAction}). Explain briefly, offer at most two directions when useful, and ask one question. Do not write the participant's final Blueprint answer.`
     : requestedSupport === "reduced"
@@ -270,7 +278,7 @@ export async function POST(request: Request) {
     answer = responseText(result);
     if (!answer) throw new Error("OpenAI returned an empty answer.");
     status = "success";
-    return Response.json({ answer, model, inputTokens, outputTokens, eventId, cogneeMemoryUsed, sharedParticipantContextUsed: true });
+    return Response.json({ answer, model, inputTokens, outputTokens, eventId, researchEpisodeId, cogneeMemoryUsed, sharedParticipantContextUsed: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The assistant could not answer right now.";
     errorCode ||= "assistant_error";
@@ -288,7 +296,7 @@ export async function POST(request: Request) {
       scaffold: requestedAction ? { action: requestedAction, support_level: requestedSupport, question_id: String(input.scaffold?.questionId || "").slice(0, 80), fevi_stage: String(input.scaffold?.feviStage || "").slice(0, 30) } : null,
       occurred_at: new Date(occurredAt).toISOString(), evidence_type: "observed_fact",
     });
-    await runtime.DB.batch([runtime.DB.prepare(
+    const durableWrites = [runtime.DB.prepare(
       `INSERT INTO prompt_events
         (id, parent_prompt_event_id, conversation_id, anonymous_participant_id, anonymous_team_id, page, tutorial_step, task_reference, user_prompt, system_prompt_version,
          context_type, context_reference, agent_name, model_name, response_text,
@@ -304,7 +312,27 @@ export async function POST(request: Request) {
       VALUES (?, 'prompt_event', ?, ?, ?, 'pending', 0, ?)
       ON CONFLICT(source_type, source_id) DO NOTHING`).bind(
       crypto.randomUUID(), eventId, "agentforge_learning_signals", memoryPayload, occurredAt,
-    )]);
+    )];
+    const episodeStimulus = JSON.stringify({
+      action: requestedAction || null,
+      supportLevel: requestedSupport || "none",
+      questionId: String(input.scaffold?.questionId || currentQuestionId).slice(0, 80),
+      currentAnswer,
+      blueprintBefore: blueprintPayload,
+    });
+    const episodeResponse = JSON.stringify({ prompt, assistantResponse: answer || null, status, errorCode });
+    if (existingResearchEpisode) durableWrites.push(runtime.DB.prepare(`UPDATE research_episodes SET
+      source_prompt_event_id=?,status=?,stimulus_json=?,response_json=?,started_at=COALESCE(started_at,?)
+      WHERE id=? AND participant_id=?`)
+      .bind(eventId, status === "success" ? "shown" : "dismissed", episodeStimulus, episodeResponse, startedAt, researchEpisodeId, participantId));
+    else durableWrites.push(runtime.DB.prepare(`INSERT INTO research_episodes
+      (id,participant_id,team_id,episode_type,scaffold_level,fevi_stage,source_page,source_prompt_event_id,status,stimulus_json,response_json,started_at,submitted_at,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(researchEpisodeId, participantId, teamId, requestedAction ? "scaffold" : "reflection",
+        requestedSupport === "guided" ? "full" : requestedSupport === "reduced" ? "faded" : "none",
+        String(input.scaffold?.feviStage || feviStageForStep(savedStep)).slice(0, 30), page, eventId,
+        status === "success" ? "shown" : "dismissed", episodeStimulus, episodeResponse, startedAt, null, occurredAt));
+    await runtime.DB.batch(durableWrites);
     if (status === "success") await settleAssistantReservation(runtime, requestId, Number(inputTokens || 0) + Number(outputTokens || 0), occurredAt);
     else await failAssistantReservation(runtime, requestId, errorCode, occurredAt);
     await runtime.DB.prepare("DELETE FROM assistant_active_leases WHERE participant_id=? AND request_id=?")

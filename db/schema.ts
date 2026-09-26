@@ -648,8 +648,67 @@ export const participantOnboardingRevisions = sqliteTable("participant_onboardin
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (table) => [index("participant_onboarding_revisions_participant_idx").on(table.participantId, table.createdAt)]);
 
+export const participantInterviewEvents = sqliteTable("participant_interview_events", {
+  id: text("id").primaryKey(),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  teamId: text("team_id").references(() => teams.id),
+  eventType: text("event_type", { enum: ["question_shown", "answer_saved", "answer_skipped", "followup_generated", "followup_fallback"] }).notNull(),
+  questionId: text("question_id").notNull(),
+  questionVersion: text("question_version").notNull(),
+  promptText: text("prompt_text"),
+  required: integer("required", { mode: "boolean" }).notNull().default(false),
+  source: text("source", { enum: ["fixed", "deterministic", "ai"] }).notNull(),
+  branchRule: text("branch_rule"),
+  answerValue: text("answer_value"),
+  modelName: text("model_name"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  consentVersion: text("consent_version").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("participant_interview_events_participant_idx").on(table.participantId, table.createdAt),
+  index("participant_interview_events_question_idx").on(table.participantId, table.questionId, table.createdAt),
+  uniqueIndex("participant_interview_followup_unique").on(table.participantId, table.questionId)
+    .where(sql`${table.eventType} IN ('followup_generated','followup_fallback')`),
+]);
+
+export const researchEpisodes = sqliteTable("research_episodes", {
+  id: text("id").primaryKey(),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  teamId: text("team_id").references(() => teams.id),
+  clientKey: text("client_key"),
+  episodeType: text("episode_type", { enum: ["scaffold", "reflection", "transfer"] }).notNull(),
+  scaffoldLevel: text("scaffold_level", { enum: ["full", "faded", "none"] }).notNull(),
+  feviStage: text("fevi_stage"),
+  sourcePage: text("source_page"),
+  sourcePromptEventId: text("source_prompt_event_id").references(() => promptEvents.id),
+  status: text("status", { enum: ["eligible", "shown", "skipped", "dismissed", "submitted"] }).notNull().default("eligible"),
+  stimulusJson: text("stimulus_json"),
+  responseJson: text("response_json"),
+  startedAt: integer("started_at", { mode: "timestamp" }),
+  submittedAt: integer("submitted_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("research_episodes_participant_client_unique").on(table.participantId, table.clientKey),
+  index("research_episodes_participant_idx").on(table.participantId, table.createdAt),
+  index("research_episodes_type_idx").on(table.episodeType, table.scaffoldLevel, table.createdAt),
+]);
+
+export const researchEpisodeEvents = sqliteTable("research_episode_events", {
+  id: text("id").primaryKey(),
+  researchEpisodeId: text("research_episode_id").notNull().references(() => researchEpisodes.id),
+  participantId: text("participant_id").notNull().references(() => eventParticipants.id),
+  eventType: text("event_type", { enum: ["offered", "opened", "viewed", "dismissed", "skipped", "acted_on", "decision_recorded", "verification_recorded", "revision_linked"] }).notNull(),
+  metadataJson: text("metadata_json"),
+  occurredAt: integer("occurred_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  index("research_episode_events_episode_idx").on(table.researchEpisodeId, table.occurredAt),
+  index("research_episode_events_participant_idx").on(table.participantId, table.occurredAt),
+]);
+
 export const learningCheckins = sqliteTable("learning_checkins", {
   id: text("id").primaryKey(),
+  researchEpisodeId: text("research_episode_id").references(() => researchEpisodes.id),
   participantId: text("event_participant_id").notNull().references(() => eventParticipants.id),
   teamId: text("team_id").references(() => teams.id),
   checkpointType: text("checkpoint_type", { enum: ["baseline", "episode_reflection", "transfer"] }).notNull(),
@@ -659,6 +718,7 @@ export const learningCheckins = sqliteTable("learning_checkins", {
   responseJson: text("response_json").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 }, (table) => [
+  uniqueIndex("learning_checkins_research_episode_unique").on(table.researchEpisodeId),
   index("learning_checkins_participant_idx").on(table.participantId, table.createdAt),
   index("learning_checkins_type_idx").on(table.checkpointType, table.createdAt),
 ]);

@@ -49,9 +49,12 @@ export async function GET(request: Request) {
     return new Response(object.body, { headers });
   }
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections, clawmaxPurges, operations, submissions] = await Promise.all([
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections, clawmaxPurges, operations, submissions, researchEpisodeSummary, researchEpisodeRecent] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
+      (SELECT COUNT(*) FROM participant_interview_events WHERE event_type='followup_generated') AS interviewerCalls,
+      (SELECT COALESCE(SUM(input_tokens),0) FROM participant_interview_events WHERE event_type='followup_generated') AS interviewerInputTokens,
+      (SELECT COALESCE(SUM(output_tokens),0) FROM participant_interview_events WHERE event_type='followup_generated') AS interviewerOutputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
       COALESCE(ROUND(AVG(latency_ms)),0) AS avgLatencyMs,
       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS lastHour
@@ -157,11 +160,19 @@ export async function GET(request: Request) {
       FROM team_submissions s LEFT JOIN teams t ON t.id=s.team_id
       LEFT JOIN event_participants ep ON ep.id=s.submitted_by_participant_id
       ORDER BY s.updated_at DESC LIMIT 100`).all(),
+    runtime.DB.prepare(`SELECT episode_type AS episodeType,scaffold_level AS scaffoldLevel,status,COUNT(*) AS count
+      FROM research_episodes GROUP BY episode_type,scaffold_level,status ORDER BY episode_type,scaffold_level,status`).all(),
+    runtime.DB.prepare(`SELECT re.id,re.episode_type AS episodeType,re.scaffold_level AS scaffoldLevel,re.fevi_stage AS feviStage,
+      re.source_page AS sourcePage,re.source_prompt_event_id AS promptEventId,re.status,re.created_at AS createdAt,
+      COALESCE(ep.display_name,'Unknown participant') AS participantDisplayName,COALESCE(t.name,'Unassigned') AS teamName,
+      (SELECT COUNT(*) FROM research_episode_events ree WHERE ree.research_episode_id=re.id) AS eventCount
+      FROM research_episodes re LEFT JOIN event_participants ep ON ep.id=re.participant_id
+      LEFT JOIN teams t ON t.id=re.team_id ORDER BY re.created_at DESC LIMIT 100`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
   const safeFeedbacks = feedbacks.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")) }));
-  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "participant_orientation_acknowledgements", "assistant_feedback_events", "assistant_token_usage", "assistant_token_reservations", "learning_checkins", "learner_notes", "agent_design_blueprints", "agent_design_events", "team_memberships", "team_invites"];
+  const requiredTables = ["app_users", "user_credentials", "user_identities", "auth_sessions", "auth_audit_logs", "auth_action_tokens", "participant_onboarding_profiles", "participant_onboarding_drafts", "participant_onboarding_revisions", "participant_interview_events", "research_episodes", "research_episode_events", "participant_orientation_acknowledgements", "assistant_feedback_events", "assistant_token_usage", "assistant_token_reservations", "learning_checkins", "learner_notes", "agent_design_blueprints", "agent_design_events", "team_memberships", "team_invites"];
   const schemaTables = await runtime.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all<{ name: string }>();
   const presentTables = new Set(schemaTables.results.map((row) => row.name));
   const missingTables = requiredTables.filter((name) => !presentTables.has(name));
@@ -171,7 +182,7 @@ export async function GET(request: Request) {
     FROM assistant_token_reservations`).bind(Date.now(), Date.now()).first<{ active: number | null; stale: number | null }>() : { active: 0, stale: 0 };
   const eventSchedule = await runtime.DB.prepare("SELECT starts_at AS startsAt,ends_at AS endsAt FROM event_configuration WHERE id='primary'").first<{ startsAt: number | null; endsAt: number | null }>();
   const cogneeErrorCount = Number((cogneeSync.results as Array<{ status?: string; count?: number }>).find((row) => row.status === "error")?.count || 0);
-  return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
+  return Response.json({ generatedAt: Date.now(), summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: { ...(settings || { assistantEnabled: 1, eventTokenQuota: 5000000, defaultTeamTokenQuota: 100000, defaultParticipantTokenQuota: 25000, perMinuteRequestLimit: 10, perHourRequestLimit: 100, maxConcurrentRequests: 2, maxOutputTokens: 1500 }), providerKeyCount: configuredProviderKeyCount(runtime), keyRouting: "stable_team_shard" },
     feedbacks: safeFeedbacks,
     preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), scheduleConfigured: Boolean(eventSchedule?.startsAt && eventSchedule?.endsAt), clawmaxConfigured: Boolean(runtime.CLAWMAX_APP_URL), queueConfigured: Boolean(runtime.COGNEE_SYNC_QUEUE), cogneeErrorCount, activeReservations: Number(reservationHealth?.active || 0), staleReservations: Number(reservationHealth?.stale || 0), expectedParticipantScale: "50–70" },
@@ -180,6 +191,7 @@ export async function GET(request: Request) {
     participantModel: participantModel.results, learningSignals: learningSignals.results,
     operations: operations || { registeredParticipants: 0, activeTeams: 0, submittedTeams: 0, completeSubmissions: 0, feedbackCount: 0 },
     submissions: submissions.results,
+    researchEpisodes: { summary: researchEpisodeSummary.results, recent: researchEpisodeRecent.results },
     promptClusters: promptClusters.results, signalEvidence: signalEvidence.results,
     promptEvaluations: promptEvaluations.results.map((row) => ({
       ...row, totalScore: row.totalScore ?? evaluationScore(row.evaluationJson),

@@ -7,7 +7,7 @@ const scaffoldLevels = new Set(["explicit", "light", "minimal"]);
 export async function GET(request: Request) {
   const auth = await requireCurrentAccount(request, env.DB);
   if (auth.error) return auth.error;
-  const result = await env.DB.prepare(`SELECT id,checkpoint_type AS checkpointType,stage,prompt_event_id AS promptEventId,
+  const result = await env.DB.prepare(`SELECT id,research_episode_id AS researchEpisodeId,checkpoint_type AS checkpointType,stage,prompt_event_id AS promptEventId,
     scaffold_level AS scaffoldLevel,response_json AS responseJson,created_at AS createdAt
     FROM learning_checkins WHERE event_participant_id=? ORDER BY created_at DESC`)
     .bind(auth.account!.participantId).all();
@@ -39,10 +39,21 @@ export async function POST(request: Request) {
     if (!linked) return Response.json({ error: "The linked Prompt does not belong to this participant." }, { status: 403 });
   }
   const id = crypto.randomUUID();
+  const researchEpisodeId = crypto.randomUUID();
   const createdAt = Date.now();
-  await env.DB.prepare(`INSERT INTO learning_checkins
-    (id,event_participant_id,team_id,checkpoint_type,stage,prompt_event_id,scaffold_level,response_json,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?)`)
-    .bind(id, auth.account!.participantId, auth.account!.teamId, checkpointType, stage, promptEventId, scaffoldLevel, responseJson, createdAt).run();
-  return Response.json({ checkin: { id, checkpointType, stage, promptEventId, scaffoldLevel, responseJson, createdAt } });
+  const episodeType = checkpointType === "episode_reflection" ? "reflection" : checkpointType === "transfer" ? "transfer" : "scaffold";
+  const researchScaffoldLevel = scaffoldLevel === "explicit" ? "full" : scaffoldLevel === "light" ? "faded" : "none";
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO research_episodes
+      (id,participant_id,team_id,episode_type,scaffold_level,fevi_stage,source_page,source_prompt_event_id,status,stimulus_json,response_json,started_at,submitted_at,created_at)
+      VALUES (?,?,?,?,?,?,?,?,'submitted',NULL,?,?,?,?)`)
+      .bind(researchEpisodeId, auth.account!.participantId, auth.account!.teamId, episodeType, researchScaffoldLevel,
+        checkpointType === "transfer" ? "Integrate" : checkpointType === "episode_reflection" ? "Verify" : "Formulate",
+        stage, promptEventId, responseJson, createdAt, createdAt, createdAt),
+    env.DB.prepare(`INSERT INTO learning_checkins
+      (id,research_episode_id,event_participant_id,team_id,checkpoint_type,stage,prompt_event_id,scaffold_level,response_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .bind(id, researchEpisodeId, auth.account!.participantId, auth.account!.teamId, checkpointType, stage, promptEventId, scaffoldLevel, responseJson, createdAt),
+  ]);
+  return Response.json({ checkin: { id, researchEpisodeId, checkpointType, stage, promptEventId, scaffoldLevel, responseJson, createdAt } });
 }

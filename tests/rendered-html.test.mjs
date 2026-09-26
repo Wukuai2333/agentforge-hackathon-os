@@ -175,24 +175,50 @@ test("explains FEVI to participants and opens ClawMax through a server handoff",
 });
 
 test("runs a participant-reported onboarding interview before the project canvas", async () => {
-  const [portal, onboarding, assistant, account, schema, migration, styles] = await Promise.all([
-    source("app/portal.tsx"), source("app/api/onboarding/route.ts"), source("app/api/assistant/route.ts"),
-    source("lib/account.ts"), source("db/schema.ts"), source("drizzle/0023_participant_interviewer.sql"), source("app/globals.css"),
+  const [portal, onboarding, followup, assistant, account, myData, checkins, episodes, canvas, schema, migration, researchMigration, episodeLinkMigration, limitMigration, episodeEventsMigration, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/onboarding/route.ts"), source("app/api/onboarding/follow-up/route.ts"), source("app/api/assistant/route.ts"),
+    source("lib/account.ts"), source("app/api/me/route.ts"), source("app/api/checkins/route.ts"), source("app/api/research/episodes/route.ts"), source("app/api/canvas/route.ts"), source("db/schema.ts"),
+    source("drizzle/0023_participant_interviewer.sql"), source("drizzle/0032_interviewer_and_research_episodes.sql"),
+    source("drizzle/0033_link_learning_checkins_to_research_episodes.sql"), source("drizzle/0034_enforce_interviewer_call_limit.sql"), source("drizzle/0035_research_episode_events.sql"), source("app/globals.css"),
   ]);
   assert.match(portal, /PARTICIPANT INTERVIEW/);
   assert.match(portal, /NYU Tandon student/);
   assert.match(portal, /Prior agent-building experience|agent_experience/);
+  assert.match(portal, /Mira · AgentForge Interviewer/);
+  assert.match(portal, /cognee_familiarity/);
+  assert.match(portal, /baseline_confidence/);
   assert.match(portal, /How should Ask AI work with you/);
   assert.match(portal, /Response style/);
   assert.match(portal, /autoFocus/);
   assert.match(onboarding, /participant_reported_fact/);
   assert.match(onboarding, /onboarding_interview/);
   assert.match(onboarding, /response_length/);
+  assert.match(followup, /MAX_DYNAMIC_CALLS = 2/);
+  assert.match(followup, /MAX_OUTPUT_TOKENS = 1000/);
+  assert.match(followup, /followup_fallback/);
   assert.match(assistant, /lengthInstruction/);
   assert.match(assistant, /modeInstruction/);
+  assert.match(assistant, /researchEpisodeId/);
   assert.match(account, /onboardingCompleted/);
   assert.match(schema, /participantOnboardingProfiles/);
+  assert.match(schema, /participantInterviewEvents/);
+  assert.match(schema, /researchEpisodes/);
+  assert.match(schema, /researchEpisodeEvents/);
   assert.match(migration, /participant_onboarding_profiles/);
+  assert.match(researchMigration, /participant_interview_events/);
+  assert.match(researchMigration, /research_episodes/);
+  assert.match(episodeLinkMigration, /research_episode_id/);
+  assert.match(limitMigration, /participant_interview_followup_unique/);
+  assert.match(episodeEventsMigration, /research_episode_events/);
+  assert.match(episodes, /decision_recorded/);
+  assert.match(episodes, /verification_recorded/);
+  assert.match(canvas, /revision_linked/);
+  assert.match(portal, /Did this change your plan/);
+  assert.match(portal, /visibleMs: 4000/);
+  assert.match(portal, /Could not verify it yet/);
+  assert.match(myData, /onboardingRevisions/);
+  assert.match(myData, /researchEpisodeEvents/);
+  assert.match(checkins, /researchEpisodeId/);
   assert.match(styles, /interviewer-breathe/);
   assert.match(styles, /prefers-reduced-motion/);
 });
@@ -540,4 +566,13 @@ test("separates organizer operations, evidence, submissions, and system health",
   assert.match(organizer, /downloadSubmission/);
   assert.match(styles, /organizer-section-tabs/);
   assert.match(styles, /evidence-row/);
+});
+
+test("keeps sidebar controls inside the usable viewport", async () => {
+  const styles = await source("app/globals.css");
+  assert.match(styles, /\.app-shell[^}]*min-height:100dvh/);
+  assert.match(styles, /\.sidebar[^}]*height:100dvh[^}]*overflow:hidden/);
+  assert.match(styles, /\.sidebar>nav\{[^}]*min-height:0[^}]*overflow-y:auto/);
+  assert.match(styles, /\.sidebar-bottom[^}]*flex:none/);
+  assert.match(styles, /env\(safe-area-inset-bottom\)/);
 });
