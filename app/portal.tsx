@@ -125,7 +125,8 @@ function InteractionPreferencePicker({ responseLength, interactionMode, onLength
   return <div className={`interaction-preferences ${compact ? "compact" : ""}`}><fieldset><legend>ANSWER LENGTH</legend><div>{([['brief','Brief'],['balanced','Balanced'],['detailed','Detailed']] as Array<[ResponseLength,string]>).map(([value,label]) => <button type="button" key={value} className={responseLength === value ? "selected" : ""} aria-pressed={responseLength === value} onClick={() => onLength(value)}>{label}</button>)}</div></fieldset><fieldset><legend>HOW SHOULD AI HELP?</legend><div>{([['guide','Guide me'],['collaborate','Work with me'],['direct','Be direct']] as Array<[InteractionMode,string]>).map(([value,label]) => <button type="button" key={value} className={interactionMode === value ? "selected" : ""} aria-pressed={interactionMode === value} onClick={() => onMode(value)}>{label}</button>)}</div></fieldset></div>;
 }
 
-type AuthConfig = { enabled: boolean; mode: "agentforge"; googleEnabled: boolean; emailDeliveryConfigured?: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
+type AuthConfig = { enabled: boolean; mode: "agentforge"; emailDeliveryConfigured?: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
+type LegacyAuthConfig = AuthConfig & { googleEnabled?: boolean };
 
 async function endSession() {
   try { await fetch("/api/auth/session", { method: "DELETE" }); } finally {
@@ -196,7 +197,7 @@ function AuthPanel({ eventName }: { eventName: string }) {
 }
 
 function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
-  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [config, setConfig] = useState<LegacyAuthConfig | null>(null);
   const [mode, setMode] = useState<"signup" | "signin" | "forgot" | "verify" | "reset">("signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -216,7 +217,7 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
       if (token && authAction === "verify") { setActionToken(token); setMode("verify"); }
       if (token && authAction === "reset") { setActionToken(token); setMode("reset"); }
       void fetch("/api/auth/config").then(async (response) => {
-        const next = await response.json() as AuthConfig;
+        const next = await response.json() as LegacyAuthConfig;
         if (!cancelled) { setConfig(next); if (!next.registrationOpen && !token) setMode("signin"); }
       }).catch(() => { if (!cancelled) setError("Authentication could not be prepared."); });
     }, 0);
@@ -302,7 +303,6 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
         {mode === "forgot" && <><p>Enter your email. For privacy, the confirmation looks the same whether or not an account exists.</p><button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
         {mode === "verify" && <><p>{actionToken ? "This one-time link will verify your email and sign you in." : "Check your inbox, or request a fresh one-time verification link."}</p>{actionToken ? <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("verify")}>{busy ? "Verifying…" : "Verify email →"}</button> : <button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("request_verification")}>{busy ? "Sending…" : "Resend verification email"}</button>}<button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
         {mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("reset")}>{busy ? "Updating…" : "Update password →"}</button>}
-        {(mode === "signup" || mode === "signin") && <><div className="auth-divider"><span>OR</span></div><button className="google-button" disabled><b>G</b>Google OAuth is the next phase</button></>}
         <p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p>
       </>}
     </section>
