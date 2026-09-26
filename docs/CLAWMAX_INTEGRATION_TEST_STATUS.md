@@ -79,7 +79,7 @@ The stock ClawMax source currently hard-codes `clawmax-ai` and `digo` as allowed
 Point the stock `clawmax-ai` reference destination at the AgentForge receiver. AgentForge temporarily binds its test credential to `clawmax-ai`. The ClawMax UI will still say “ClawMax.ai”; this proves consent, capture, redaction, outbox, delivery, authentication, and retry transport only.
 
 ```env
-CLAWMAX_ACTIVITY_EXPORT_ENDPOINT=https://agentforge-hackathon-os.yr2110.chatgpt.site/api/clawmax/activity-events
+CLAWMAX_ACTIVITY_EXPORT_ENDPOINT=https://cogniloop.space/api/clawmax/activity-events
 CLAWMAX_ACTIVITY_EXPORT_TOKEN=<dedicated AgentForge test token>
 CLAWMAX_ACTIVITY_EXPORT_INTERVAL_MS=1000
 ```

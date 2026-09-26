@@ -1,6 +1,7 @@
 # AgentForge Cloudflare production runbook
 
-The current ChatGPT Site remains the fallback until this deployment passes migrations, smoke tests, and the 100/200-user load test. Do not change DNS first.
+`https://cogniloop.space` is the production origin. Keep the `workers.dev`
+hostname available as an emergency fallback and validate both after every deploy.
 
 ## 1. Create paid resources
 
@@ -8,6 +9,7 @@ The current ChatGPT Site remains the fallback until this deployment passes migra
 2. Create `agentforge-hackathon-prod` in Eastern North America (`enam`).
 3. Create queues `agentforge-cognee-sync` and `agentforge-cognee-sync-dlq`.
 4. Copy `wrangler.production.example.jsonc` to the ignored file `wrangler.production.jsonc` and replace the D1 database ID.
+5. Keep `cogniloop.space` and `www.cogniloop.space` as Custom Domains and keep `workers_dev` enabled as the emergency fallback.
 
 ## 2. Configure secrets
 
@@ -32,10 +34,15 @@ npx wrangler deploy --config dist/server/wrangler.json
 ```
 
 The generated `dist/server/wrangler.json` points Wrangler at vinext's compiled
-Worker entry and production bindings. Deploying from the source config directly
-will skip the generated virtual RSC entry and fail to bundle the application.
+Worker entry, production bindings, Custom Domains, and `workers.dev` fallback.
+Deploying from the source config directly will skip the generated virtual RSC
+entry and fail to bundle the application.
 
-## 4. Verify before DNS
+## 4. Verify the production hostnames
+
+- Confirm `https://cogniloop.space` and `https://www.cogniloop.space` return HTTP 200 with valid TLS.
+- Confirm `https://agentforge-hackathon-os.yr2110.workers.dev` remains available as the emergency fallback.
+- Set `APP_ORIGIN=https://cogniloop.space` so verification and password-reset links use the production hostname.
 
 - Register a new participant, verify email, sign in/out, and reset the password.
 - Complete consent, onboarding, solo/team assignment, Blueprint autosave, Ask AI, feedback, and ClawMax ingestion.
@@ -45,9 +52,12 @@ will skip the generated virtual RSC entry and fail to bundle the application.
 - Keep AI calls disabled in the load test unless test accounts and an explicit provider budget have been prepared.
 - Export D1 using `scripts/backup-d1.ps1` and test importing the export into a disposable database.
 
-## 5. Cut over and rollback
+## 5. Rollback
 
-Lower DNS TTL before the event. Point the production hostname to the verified Worker only after the checklist passes. Keep the ChatGPT Site URL available. If error rate, p95 latency, authentication, or data writes regress, return the hostname/link to the fallback and preserve the new D1 database for diagnosis.
+If error rate, p95 latency, authentication, or data writes regress, direct organizers
+to the verified `workers.dev` fallback while diagnosing the same Worker version.
+Preserve the D1 database and queue state for diagnosis; do not switch back to the
+legacy ChatGPT Site or create a second production database.
 
 ## Capacity guardrails
 

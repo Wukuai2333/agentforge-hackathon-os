@@ -132,7 +132,7 @@ AgentForge will provide the following values to the ClawMax integration owner. P
 | Credential owner | AgentForge event platform operator |
 | Retention | Event-specific disclosure; proposed launch default in Section 17 |
 
-The current `chatgpt.site` URL is a prototype host and MUST NOT be treated as the final production ingestion origin. A stable production hostname will replace the placeholder without changing the path or payload contract.
+The production ingestion origin is `https://cogniloop.space`. The legacy `chatgpt.site` URL was a prototype host and MUST NOT be used for production delivery. The path and payload contract remain unchanged.
 
 ## 6. Destination configuration and participant consent are separate
 
