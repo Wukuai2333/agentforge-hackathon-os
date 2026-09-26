@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { authAudit, createLocalSession, hashPassword, normalizedEmail, sessionCookie, sha256, verifyPassword } from "../../../../lib/local-auth";
 import { emailConfigured, issueAuthEmail, type AuthEmailRuntime } from "../../../../lib/auth-email";
 
-type Runtime = AuthEmailRuntime & { ORGANIZER_EMAILS?: string };
+type Runtime = AuthEmailRuntime & { ORGANIZER_EMAILS?: string; AUTH_REQUIRE_EMAIL_VERIFICATION?: string; AUTH_EMAIL_VERIFICATION_BYPASS_EMAILS?: string };
 type Input = { action?: "signup" | "signin"; email?: string; password?: string; displayName?: string };
 type Credential = {
   userId: string;
@@ -22,6 +22,12 @@ const LOGIN_LOCK_MS = 5 * 60 * 1000;
 
 function organizerEmails(runtime: Runtime) {
   return new Set((runtime.ORGANIZER_EMAILS || "").split(",").map(normalizedEmail).filter(Boolean));
+}
+
+function requiresEmailVerification(runtime: Runtime, email: string) {
+  if (String(runtime.AUTH_REQUIRE_EMAIL_VERIFICATION || "true").trim().toLowerCase() === "false") return false;
+  const dryRunBypass = new Set((runtime.AUTH_EMAIL_VERIFICATION_BYPASS_EMAILS || "").split(",").map(normalizedEmail).filter(Boolean));
+  return !dryRunBypass.has(normalizedEmail(email));
 }
 
 function jsonWithSession(body: unknown, token: string, status = 200) {
@@ -46,7 +52,8 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
   const displayName = (input.displayName || "").trim().slice(0, 100);
   const password = input.password || "";
   if (!await registrationIsOpen(runtime.DB)) return Response.json({ error: "Registration is currently closed." }, { status: 403 });
-  if (!emailConfigured(runtime)) return Response.json({ error: "Registration email is not configured yet. Please contact an Organizer." }, { status: 503 });
+  const verificationRequired = requiresEmailVerification(runtime, email);
+  if (verificationRequired && !emailConfigured(runtime)) return Response.json({ error: "Registration email is not configured yet. Please contact an Organizer." }, { status: 503 });
   if (!/^\S+@\S+\.\S+$/.test(email)) return Response.json({ error: "Enter a valid email address." }, { status: 400 });
   if (!displayName) return Response.json({ error: "Enter the name your teammates should see." }, { status: 400 });
   if (password.length < 12) return Response.json({ error: "Use a password with at least 12 characters." }, { status: 400 });
@@ -85,6 +92,12 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
   } catch {
     await authAudit(runtime.DB, request, "signup", "database_conflict", { email });
     return Response.json({ error: "This email is already registered. Sign in instead." }, { status: 409 });
+  }
+  if (!verificationRequired) {
+    await runtime.DB.prepare("UPDATE app_users SET email_verified_at=?,updated_at=? WHERE id=?").bind(now, now, userId).run();
+    const session = await createLocalSession(runtime.DB, request, userId);
+    await authAudit(runtime.DB, request, "signup", "success", { email, userId, sessionId: session.id, metadata: { emailVerification: "temporarily_paused" } });
+    return jsonWithSession({ authenticated: true, identity: { subject: userId, email, displayName, provider: "password" }, emailVerificationPaused: true }, session.token, 201);
   }
   try { await issueAuthEmail(runtime, { id: userId, email, displayName }, "verify_email"); }
   catch (problem) {
@@ -125,7 +138,7 @@ async function signin(request: Request, runtime: Runtime, input: Input) {
     return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
   }
 
-  if (!credential.emailVerifiedAt) {
+  if (requiresEmailVerification(runtime, email) && !credential.emailVerifiedAt) {
     await authAudit(runtime.DB, request, "signin", "email_unverified", { email, userId: credential.userId });
     return Response.json({ error: "Verify your email before signing in.", code: "email_verification_required", verificationRequired: true, email }, { status: 403 });
   }

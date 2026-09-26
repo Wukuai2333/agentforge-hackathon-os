@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
+import { isTeamCapacityError, teamCapacityResponse } from "../../../lib/team-capacity";
 
 type Runtime = { DB: D1Database; ORGANIZER_EMAILS?: string };
 const serverOrganizerEmails = (runtime: Runtime) => new Set((runtime.ORGANIZER_EMAILS || "")
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
   const config = await runtime.DB.prepare(`SELECT event_name AS eventName, starts_at AS startsAt, ends_at AS endsAt,
     timezone, discord_url AS discordUrl, announcement_text AS announcementText,
     announcement_active AS announcementActive, announcement_updated_at AS announcementUpdatedAt,
-    registration_open AS registrationOpen, updated_at AS updatedAt
+    registration_open AS registrationOpen, max_active_teams AS maxActiveTeams, updated_at AS updatedAt
     FROM event_configuration WHERE id='primary'`).first();
   const publishedAnnouncements = await runtime.DB.prepare(`SELECT id, announcement_text AS announcementText,
     action, created_at AS createdAt FROM event_announcement_history
@@ -99,7 +100,7 @@ export async function DELETE(request: Request) {
 export async function PUT(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await organizerAccount(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string; announcementText?: string; announcementActive?: boolean; registrationOpen?: boolean };
+  const input = await request.json() as { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string; announcementText?: string; announcementActive?: boolean; registrationOpen?: boolean; maxActiveTeams?: number };
   const startsAt = Number(input.startsAt) || null, endsAt = Number(input.endsAt) || null;
   if (startsAt && endsAt && endsAt <= startsAt) return Response.json({ error: "End time must be after start time." }, { status: 400 });
   const discordUrl = input.discordUrl?.trim() || null;
@@ -107,14 +108,15 @@ export async function PUT(request: Request) {
   const updatedAt = Date.now();
   const announcementText = input.announcementText?.trim().slice(0, 1000) || null;
   const announcementActive = Boolean(input.announcementActive && announcementText);
+  const maxActiveTeams = Math.max(1, Math.min(100, Math.floor(Number(input.maxActiveTeams) || 35)));
   const previous = await runtime.DB.prepare("SELECT announcement_text AS announcementText, announcement_active AS announcementActive FROM event_configuration WHERE id='primary'").first<{ announcementText: string | null; announcementActive: number }>();
   const announcementChanged = (previous?.announcementText || null) !== announcementText || Boolean(previous?.announcementActive) !== announcementActive;
-  const statements = [runtime.DB.prepare(`INSERT INTO event_configuration (id,event_name,starts_at,ends_at,timezone,discord_url,announcement_text,announcement_active,announcement_updated_at,registration_open,updated_at)
-    VALUES ('primary',?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET event_name=excluded.event_name,starts_at=excluded.starts_at,
+  const statements = [runtime.DB.prepare(`INSERT INTO event_configuration (id,event_name,starts_at,ends_at,timezone,discord_url,announcement_text,announcement_active,announcement_updated_at,registration_open,max_active_teams,updated_at)
+    VALUES ('primary',?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET event_name=excluded.event_name,starts_at=excluded.starts_at,
     ends_at=excluded.ends_at,timezone=excluded.timezone,discord_url=excluded.discord_url,announcement_text=excluded.announcement_text,
     announcement_active=excluded.announcement_active,announcement_updated_at=excluded.announcement_updated_at,
-    registration_open=excluded.registration_open,updated_at=excluded.updated_at`)
-    .bind(input.eventName?.trim().slice(0, 120) || "Personal Agent Hackathon", startsAt, endsAt, input.timezone?.trim().slice(0, 80) || "America/New_York", discordUrl, announcementText, announcementActive ? 1 : 0, updatedAt, input.registrationOpen === false ? 0 : 1, updatedAt)];
+    registration_open=excluded.registration_open,max_active_teams=excluded.max_active_teams,updated_at=excluded.updated_at`)
+    .bind(input.eventName?.trim().slice(0, 120) || "Personal Agent Hackathon", startsAt, endsAt, input.timezone?.trim().slice(0, 80) || "America/New_York", discordUrl, announcementText, announcementActive ? 1 : 0, updatedAt, input.registrationOpen === false ? 0 : 1, maxActiveTeams, updatedAt)];
   if (announcementChanged) {
     const action = !announcementActive ? "withdrawn" : previous?.announcementActive ? "updated" : "published";
     statements.push(runtime.DB.prepare(`INSERT INTO event_announcement_history (id,announcement_text,action,active,editor_name,created_at) VALUES (?,?,?,?,?,?)`)
@@ -139,10 +141,15 @@ export async function PATCH(request: Request) {
     const now = Date.now();
     if (input.createPersonal) {
       destinationId = crypto.randomUUID();
-      await runtime.DB.prepare(`INSERT INTO teams
-        (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
-        VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
-        .bind(destinationId, target.eventId, target.id, `${target.displayName}'s personal workspace`, target.eventId, now, now).run();
+      try {
+        await runtime.DB.prepare(`INSERT INTO teams
+          (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
+          VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
+          .bind(destinationId, target.eventId, target.id, `${target.displayName}'s personal workspace`, target.eventId, now, now).run();
+      } catch (problem) {
+        if (isTeamCapacityError(problem)) return teamCapacityResponse();
+        throw problem;
+      }
     } else {
       const destination = await runtime.DB.prepare("SELECT id FROM teams WHERE id=? AND event_id=? AND status='active'")
         .bind(destinationId, target.eventId).first<{ id: string }>();

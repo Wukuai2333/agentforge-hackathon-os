@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-type Runtime = { DB: D1Database; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string };
+type Runtime = { DB: D1Database; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; AUTH_REQUIRE_EMAIL_VERIFICATION?: string };
 
 export async function GET() {
   const runtime = env as unknown as Runtime;
@@ -9,6 +9,7 @@ export async function GET() {
     enabled: true,
     mode: "agentforge",
     emailDeliveryConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM && runtime.APP_ORIGIN),
+    emailVerificationRequired: String(runtime.AUTH_REQUIRE_EMAIL_VERIFICATION || "true").trim().toLowerCase() !== "false",
     registrationOpen: event?.registrationOpen !== 0,
   }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -13,6 +13,12 @@
       "migrations_dir": "drizzle"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "SUBMISSIONS",
+      "bucket_name": "agentforge-submissions-prod"
+    }
+  ],
   "queues": {
     "producers": [
       { "binding": "COGNEE_SYNC_QUEUE", "queue": "agentforge-cognee-sync" }

@@ -323,9 +323,9 @@ test("ships a consent-gated ClawMax enrollment and normalization path", async ()
 });
 
 test("verifies email and resets passwords with hashed one-time tokens", async () => {
-  const [password, emailRoute, emailService, migration, portal] = await Promise.all([
+  const [password, emailRoute, emailService, migration, portal, config] = await Promise.all([
     source("app/api/auth/password/route.ts"), source("app/api/auth/email/route.ts"), source("lib/auth-email.ts"),
-    source("drizzle/0024_auth_recovery_onboarding_team.sql"), source("app/portal.tsx"),
+    source("drizzle/0024_auth_recovery_onboarding_team.sql"), source("app/portal.tsx"), source("app/api/auth/config/route.ts"),
   ]);
   assert.match(password, /email_verification_required/);
   assert.match(password, /Registration email is not configured yet/);
@@ -339,6 +339,11 @@ test("verifies email and resets passwords with hashed one-time tokens", async ()
   assert.match(migration, /auth_action_tokens/);
   assert.match(portal, /Forgot password/);
   assert.match(portal, /Resend verification email/);
+  assert.match(password, /AUTH_REQUIRE_EMAIL_VERIFICATION/);
+  assert.match(password, /AUTH_EMAIL_VERIFICATION_BYPASS_EMAILS/);
+  assert.match(password, /temporarily_paused/);
+  assert.match(config, /emailVerificationRequired/);
+  assert.match(portal, /Email verification is temporarily paused for the Organizer dry run/);
 });
 
 test("saves resumable onboarding and keeps participant-controlled revision history", async () => {
@@ -457,4 +462,37 @@ test("keeps a private Learner Center for notes and Ask AI history", async () => 
   assert.match(me, /learnerNotes/);
   assert.match(styles, /\.learner-center-page/);
   assert.match(styles, /\.selection-coach/);
+});
+
+test("enforces the 35-workspace event capacity at the database boundary", async () => {
+  const [migration, account, event, portal] = await Promise.all([
+    source("drizzle/0031_team_capacity_and_submissions.sql"), source("app/api/account/route.ts"),
+    source("app/api/event/route.ts"), source("app/portal.tsx"),
+  ]);
+  assert.match(migration, /max_active_teams/);
+  assert.match(migration, /CREATE TRIGGER `teams_active_capacity_guard`/);
+  assert.match(migration, /RAISE\(ABORT,'TEAM_CAP_REACHED'\)/);
+  assert.match(account, /teamCapacityResponse/);
+  assert.match(event, /maxActiveTeams/);
+  assert.match(portal, /target 25–30 at kickoff/);
+});
+
+test("stores one team artifact and a later shareable demo link", async () => {
+  const [migration, api, portal, config, schema] = await Promise.all([
+    source("drizzle/0031_team_capacity_and_submissions.sql"), source("app/api/submissions/route.ts"),
+    source("app/portal.tsx"), source("wrangler.production.example.jsonc"), source("db/schema.ts"),
+  ]);
+  assert.match(migration, /CREATE TABLE `team_submissions`/);
+  assert.match(migration, /team_submissions_event_team_unique/);
+  assert.match(api, /MAX_FILE_BYTES = 25 \* 1024 \* 1024/);
+  assert.match(api, /submit_link/);
+  assert.match(api, /submit_file/);
+  assert.match(api, /submit_demo/);
+  assert.match(api, /AgentForge does not store the large video file|Google Drive, YouTube, Loom/);
+  assert.match(portal, /Submit the build now/);
+  assert.match(portal, /One record per active Team or Personal Workspace/);
+  assert.match(portal, /Google Drive, YouTube, Loom/);
+  assert.match(config, /agentforge-submissions-prod/);
+  assert.match(schema, /teamSubmissions/);
+  assert.match(schema, /maxActiveTeams/);
 });

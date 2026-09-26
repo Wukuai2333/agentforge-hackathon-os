@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest, requireCurrentAccount } from "../../../lib/account";
+import { isTeamCapacityError, teamCapacityResponse } from "../../../lib/team-capacity";
 
 type Runtime = { DB: D1Database; ORGANIZER_EMAILS?: string };
 const POLICY_VERSION = "AF-DEMO-2026-07";
@@ -111,8 +112,13 @@ export async function POST(request: Request) {
     const name = input.teamName?.trim().slice(0, 80) || "";
     if (!name) return Response.json({ error: "Team name is required." }, { status: 400 });
     const teamId = crypto.randomUUID(), inviteCode = crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
-    await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,data_expires_at,created_at,updated_at)
-      VALUES (?,?,?,?,?,'active',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`).bind(teamId, account.eventId, account.participantId, name, inviteCode, account.eventId, now, now).run();
+    try {
+      await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,data_expires_at,created_at,updated_at)
+        VALUES (?,?,?,?,?,'active',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`).bind(teamId, account.eventId, account.participantId, name, inviteCode, account.eventId, now, now).run();
+    } catch (problem) {
+      if (isTeamCapacityError(problem)) return teamCapacityResponse();
+      throw problem;
+    }
     await runtime.DB.prepare(`INSERT INTO team_invites (id,event_id,team_id,code,created_by_participant_id,expires_at,created_at)
       VALUES (?,?,?,?,?,(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?)`).bind(crypto.randomUUID(), account.eventId, teamId, inviteCode, account.participantId, account.eventId, now).run();
     await moveTeam(runtime, account, teamId, account.teamId ? "switched" : "created", "creator");
@@ -128,9 +134,14 @@ export async function POST(request: Request) {
   } else if (input.action === "continue_solo") {
     if (!account.teamId) {
       const teamId = crypto.randomUUID();
-      await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
-        VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
-        .bind(teamId, account.eventId, account.participantId, `${account.displayName}'s personal workspace`, account.eventId, now, now).run();
+      try {
+        await runtime.DB.prepare(`INSERT INTO teams (id,event_id,created_by_participant_id,name,invite_code,status,workspace_kind,data_expires_at,created_at,updated_at)
+          VALUES (?,?,?, ?,NULL,'active','personal',(SELECT retention_ends_at FROM hackathon_events WHERE id=?),?,?)`)
+          .bind(teamId, account.eventId, account.participantId, `${account.displayName}'s personal workspace`, account.eventId, now, now).run();
+      } catch (problem) {
+        if (isTeamCapacityError(problem)) return teamCapacityResponse();
+        throw problem;
+      }
       await moveTeam(runtime, account, teamId, "created", "creator");
     }
   } else if (input.action === "leave_team") {

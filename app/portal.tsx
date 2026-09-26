@@ -125,7 +125,7 @@ function InteractionPreferencePicker({ responseLength, interactionMode, onLength
   return <div className={`interaction-preferences ${compact ? "compact" : ""}`}><fieldset><legend>ANSWER LENGTH</legend><div>{([['brief','Brief'],['balanced','Balanced'],['detailed','Detailed']] as Array<[ResponseLength,string]>).map(([value,label]) => <button type="button" key={value} className={responseLength === value ? "selected" : ""} aria-pressed={responseLength === value} onClick={() => onLength(value)}>{label}</button>)}</div></fieldset><fieldset><legend>HOW SHOULD AI HELP?</legend><div>{([['guide','Guide me'],['collaborate','Work with me'],['direct','Be direct']] as Array<[InteractionMode,string]>).map(([value,label]) => <button type="button" key={value} className={interactionMode === value ? "selected" : ""} aria-pressed={interactionMode === value} onClick={() => onMode(value)}>{label}</button>)}</div></fieldset></div>;
 }
 
-type AuthConfig = { enabled: boolean; mode: "agentforge"; emailDeliveryConfigured?: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
+type AuthConfig = { enabled: boolean; mode: "agentforge"; emailDeliveryConfigured?: boolean; emailVerificationRequired?: boolean; registrationOpen: boolean; url?: string; publishableKey?: string };
 type LegacyAuthConfig = AuthConfig & { googleEnabled?: boolean };
 
 async function endSession() {
@@ -290,13 +290,14 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
       <span className="brand-mark large">A</span><span className="eyebrow">WELCOME TO {eventName.toUpperCase()}</span>
       <h1>Build an agent that learns with you.</h1>
       <p>Create one secure identity, then keep your consent, team, project, prompts, progress, and memory connected throughout the event.</p>
-      <div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i><span><b>2</b>Verify</span><i>→</i><span><b>3</b>Consent</span><i>→</i><span><b>4</b>Build</span></div>
+      <div className="entry-flow-map"><span><b>1</b>Sign up</span><i>→</i>{config?.emailVerificationRequired !== false && <><span><b>2</b>Verify</span><i>→</i></>}<span><b>{config?.emailVerificationRequired === false ? 2 : 3}</b>Consent</span><i>→</i><span><b>{config?.emailVerificationRequired === false ? 3 : 4}</b>Build</span></div>
       <small>AgentForge stores a salted password hash, never the original password. Sessions use secure, HttpOnly cookies.</small>
     </section>
     <section className="auth-card supabase-auth">
       <span className="eyebrow">SECURE EVENT ACCOUNT</span>
       <h2>{mode === "signup" ? "Join the hackathon" : mode === "signin" ? "Welcome back" : mode === "forgot" ? "Reset your password" : mode === "verify" ? "Verify your email" : "Choose a new password"}</h2>
       {!config ? <p>Preparing secure sign-in…</p> : <>
+        {config.emailVerificationRequired === false && <div className="auth-success"><strong>Email verification is temporarily paused for the Organizer dry run.</strong><br />New and existing test accounts can continue directly after signing in.</div>}
         {!config.registrationOpen && <div className="registration-closed-notice"><strong>Registration is closed.</strong><span>Existing Participants and Organizers can still sign in.</span></div>}
         {(mode === "signup" || mode === "signin") && <div className="auth-tabs"><button disabled={!config.registrationOpen} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setMessage(""); }}>Sign up</button><button className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setError(""); setMessage(""); }}>Sign in</button></div>}
         {mode === "signup" && <label htmlFor="agentforge-display-name">DISPLAY NAME<input id="agentforge-display-name" name="name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="How teammates will see you" /></label>}
@@ -465,7 +466,7 @@ function EntryFlow({ eventName, account, onComplete }: { eventName: string; acco
   return <div className="entry-survey interviewer-entry" style={visualStyle} onMouseMove={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); setPointer({ x: ((event.clientX - bounds.left) / bounds.width) * 100, y: ((event.clientY - bounds.top) / bounds.height) * 100 }); }}><div className="interviewer-atmosphere" aria-hidden="true"><i /><i /><i /><i /></div><header><div><span className="brand-mark">A</span><span><strong>{eventName}</strong><small>PARTICIPANT INTERVIEW</small></span></div><span>{complete ? "YOUR AI PREFERENCES" : `QUESTION ${surveyStep + 1} OF ${interviewerQuestions.length}`}</span></header><main><section className="interviewer-card"><div className="interviewer-presence"><span className="interviewer-orb">✦</span><span><strong>AgentForge Interviewer</strong><small>{complete ? "One last choice before we begin" : question.required ? "Listening · required question" : "Listening · optional question"}</small></span></div>{complete ? <><span className="eyebrow">YOU CONTROL THE INTERACTION</span><h1>How should Ask AI work with you?</h1><p>These preferences change how answers are presented. You can change them inside Ask AI at any time.</p><InteractionPreferencePicker responseLength={responseLength} interactionMode={interactionMode} onLength={setResponseLength} onMode={setInteractionMode} />{error && <p className="entry-error">{error}</p>}<div className="draft-state" data-state={draftStatus}>{draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft could not be saved" : "Your answers are saved as you continue"}</div><div className="entry-survey-actions"><button className="text-button" onClick={previousSurvey}>← Previous</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); setError(""); try { const payload = { answers: interviewerQuestions.map((item, index) => ({ id: item.id, value: answers[index] || "" })), responseLength, interactionMode }; const response = await fetch("/api/onboarding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Your interview could not be saved."); if (current) { const completed = { ...current, onboardingCompleted: true, responseLength, interactionMode }; setCurrent(completed); setStage("orientation"); } } catch (problem) { setError(problem instanceof Error ? problem.message : "Your interview could not be saved."); } finally { setSaving(false); } }}>{saving ? "Saving your profile…" : "Continue to FEVI orientation →"}</button></div></> : <><span className="eyebrow">GETTING TO KNOW HOW YOU LEARN</span><h1>{question.prompt}</h1><p>{question.helper}</p>{question.example && <p className="interviewer-example">{question.example}</p>}{question.choices && <div className="interviewer-choices">{question.choices.map((choice) => <button type="button" key={choice} className={answer === choice ? "selected" : ""} onClick={() => { setAnswer(choice); interviewInput.current?.focus(); }}>{choice}</button>)}</div>}<textarea ref={interviewInput} autoFocus rows={4} value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void continueSurvey(); } }} placeholder={question.placeholder} /><div className="draft-state" data-state={draftStatus}>{draftStatus === "loading" ? "Checking for a saved draft…" : draftStatus === "saving" ? "Saving…" : draftStatus === "saved" ? "Saved" : draftStatus === "error" ? "Could not save—try Next again" : "Changes save when you continue"}</div><div className="entry-survey-actions"><button className="text-button" disabled={surveyStep === 0} onClick={previousSurvey}>← Previous</button><button className="text-button save-exit" onClick={async () => { const nextAnswers = [...answers]; nextAnswers[surveyStep] = answer.trim(); await saveDraft(nextAnswers, surveyStep); await endSession(); window.location.reload(); }}>Save & continue later</button>{!question.required && <button className="text-button" onClick={() => { setAnswer(""); void continueSurvey(); }}>Skip for now</button>}<small>Press Enter or choose Next</small><button className="primary" disabled={question.required && !answer.trim()} onClick={() => void continueSurvey()}>Next →</button></div></>}</section><aside className="interviewer-progress"><span>YOUR PROFILE · RAW SELF-REPORT</span><p>Your words remain separate from future AI inference.</p>{interviewerQuestions.map((item, index) => <div className={index < answers.length ? "filled" : index === surveyStep ? "active" : ""} key={item.id}><b>{index < answers.length ? "✓" : index + 1}</b><span>{item.id.replaceAll("_", " ")}<small>{index < answers.length ? answers[index] ? answers[index].slice(0, 55) : "Skipped for now" : index === surveyStep ? item.required ? "Current · required" : "Current · optional" : item.required ? "Required" : "Optional"}</small></span></div>)}</aside></main></div>;
 }
 
-type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; updatedAt?: number };
+type EventConfig = { eventName?: string; startsAt?: number | null; endsAt?: number | null; timezone?: string; discordUrl?: string | null; announcementText?: string | null; announcementActive?: number | boolean; announcementUpdatedAt?: number | null; registrationOpen?: number | boolean; maxActiveTeams?: number; updatedAt?: number };
 type PublishedAnnouncement = { id: string; announcementText: string; action: "published" | "updated"; createdAt: number };
 
 function LiveEvent({ config }: { config: EventConfig | null }) {
@@ -1277,8 +1278,85 @@ function Progress() {
   </div>;
 }
 
+type TeamSubmission = { id: string; artifactKind: "file" | "link"; artifactUrl?: string | null; artifactFilename?: string | null; artifactSizeBytes?: number | null; notes?: string | null; artifactSubmittedAt: number; demoVideoUrl?: string | null; demoSubmittedAt?: number | null; demoDueAt: number; status: "artifact_submitted" | "complete" };
+
 function Demo() {
-  return <div className="demo-layout"><section><span className="eyebrow">FINAL STORY</span><h2>Show the change,<br />not just the agent.</h2><p>Your strongest demo compares the same task before and after feedback.</p><div className="upload-zone"><span>▶</span><h3>Drop your 60–90 second demo here</h3><p>MP4, MOV, or a shareable video link</p><button className="outline-button">Choose video</button></div></section><aside className="demo-checklist"><span>YOUR DEMO SHOULD PROVE</span>{["The real problem", "A working end-to-end task", "Before vs. after", "A repeatable success test", "What the agent learned", "How memory was used", "Data and privacy choices"].map((item, i) => <label key={item}><input type="checkbox" /> <b>{String(i + 1).padStart(2, "0")}</b><span>{item}</span></label>)}<button className="primary">Save demo draft</button></aside></div>;
+  const [submission, setSubmission] = useState<TeamSubmission | null>(null);
+  const [storageAvailable, setStorageAvailable] = useState(false);
+  const [mode, setMode] = useState<"link" | "file">("link");
+  const [artifactUrl, setArtifactUrl] = useState("");
+  const [demoUrl, setDemoUrl] = useState("");
+  const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [shareConfirmed, setShareConfirmed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function load() {
+    setLoading(true); setError("");
+    try {
+      const response = await fetch("/api/submissions");
+      const result = await response.json() as { submission?: TeamSubmission | null; storageAvailable?: boolean; error?: string };
+      if (!response.ok) throw new Error(result.error || "Submission status could not be loaded.");
+      setSubmission(result.submission || null); setStorageAvailable(Boolean(result.storageAvailable));
+      if (result.submission?.demoVideoUrl) setDemoUrl(result.submission.demoVideoUrl);
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "Submission status could not be loaded."); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function submitArtifact() {
+    setBusy("artifact"); setError(""); setNotice("");
+    try {
+      let response: Response;
+      if (mode === "link") {
+        response = await fetch("/api/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit_link", artifactUrl, notes }) });
+      } else {
+        if (!file) throw new Error("Choose a project artifact file first.");
+        const payload = new FormData(); payload.set("action", "submit_file"); payload.set("file", file); payload.set("notes", notes);
+        response = await fetch("/api/submissions", { method: "POST", body: payload });
+      }
+      const result = await response.json() as { submission?: TeamSubmission; error?: string };
+      if (!response.ok || !result.submission) throw new Error(result.error || "The project artifact could not be submitted.");
+      setSubmission(result.submission); setNotice("Project artifact submitted. Your team can now add the demo video link from home.");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "The project artifact could not be submitted."); }
+    finally { setBusy(""); }
+  }
+
+  async function submitDemo() {
+    setBusy("demo"); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit_demo", demoVideoUrl: demoUrl }) });
+      const result = await response.json() as { submission?: TeamSubmission; error?: string };
+      if (!response.ok || !result.submission) throw new Error(result.error || "The demo link could not be saved.");
+      setSubmission(result.submission); setNotice("Demo link saved. Your team submission is complete.");
+    } catch (problem) { setError(problem instanceof Error ? problem.message : "The demo link could not be saved."); }
+    finally { setBusy(""); }
+  }
+
+  return <div className="submission-page">
+    <section className="submission-hero"><div><span className="eyebrow">TEAM SUBMISSION</span><h2>Submit the build now.<br />Tell the story from home.</h2><p>Each team submits one project artifact before leaving. Add a short demo video link within 24 hours so Organizers can evaluate the working result and your design decisions.</p></div><aside><strong>{submission?.status === "complete" ? "2/2" : submission ? "1/2" : "0/2"}</strong><span>submission steps complete</span><small>One record per active Team or Personal Workspace</small></aside></section>
+    {notice && <p className="coach-notice">✓ {notice}</p>}{error && <p className="form-error">{error}</p>}
+    {loading ? <div className="submission-loading">Loading your team submission…</div> : <div className="submission-grid">
+      <section className={submission ? "submission-card complete" : "submission-card"}><header><b>01</b><div><span>BEFORE YOU LEAVE</span><h3>Project artifact</h3><p>Submit a ClawMax export, compact project file, or a shareable Drive/GitHub link. This step can only be submitted once.</p></div>{submission && <em>Submitted</em>}</header>
+        {submission ? <div className="submission-receipt"><strong>{submission.artifactKind === "link" ? "Shareable project link" : submission.artifactFilename || "Uploaded artifact"}</strong><span>{new Date(submission.artifactSubmittedAt).toLocaleString()}</span>{submission.artifactKind === "link" && submission.artifactUrl ? <a href={submission.artifactUrl} target="_blank" rel="noreferrer">Open artifact ↗</a> : <a href="/api/submissions?download=artifact">Download artifact ↓</a>}{submission.notes && <p>{submission.notes}</p>}<small>Need to replace this? Ask an Organizer so the original submission remains auditable.</small></div> : <>
+          <div className="submission-tabs"><button className={mode === "link" ? "active" : ""} onClick={() => setMode("link")}>Share a link</button><button className={mode === "file" ? "active" : ""} disabled={!storageAvailable} title={storageAvailable ? "Upload a small project artifact" : "File storage is not configured; use a link"} onClick={() => setMode("file")}>Upload a file</button></div>
+          {mode === "link" ? <label>PROJECT LINK<input type="url" value={artifactUrl} onChange={(event) => setArtifactUrl(event.target.value)} placeholder="https://drive.google.com/… or https://github.com/…" /><small>Google Drive, GitHub, or another HTTPS link is accepted.</small></label> : <label>PROJECT FILE<input type="file" accept=".zip,.json,.pdf,.txt,.md,.yaml,.yml" onChange={(event) => setFile(event.target.files?.[0] || null)} /><small>ZIP, JSON, PDF, TXT, Markdown, or YAML · maximum 25 MB.</small></label>}
+          <label>SHORT NOTE <small>Optional</small><textarea rows={3} maxLength={1500} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="What should the reviewer open or run first?" /></label>
+          {mode === "link" && <label className="sharing-confirmation"><input type="checkbox" checked={shareConfirmed} onChange={(event) => setShareConfirmed(event.target.checked)} /><span>I confirmed that Organizers can open or download this link without requesting access.</span></label>}
+          <button className="primary" disabled={busy === "artifact" || (mode === "link" ? !artifactUrl.trim() || !shareConfirmed : !file)} onClick={() => void submitArtifact()}>{busy === "artifact" ? "Submitting…" : "Submit project artifact →"}</button>
+        </>}
+      </section>
+      <section className={submission?.demoVideoUrl ? "submission-card complete" : "submission-card"}><header><b>02</b><div><span>FROM HOME · SHARE WITHIN 24 HOURS</span><h3>Demo video link</h3><p>Use Google Drive, YouTube, Loom, or another shareable HTTPS video link. AgentForge does not store the large video file.</p></div>{submission?.demoVideoUrl && <em>Complete</em>}</header>
+        <label>DEMO VIDEO LINK<input type="url" value={demoUrl} onChange={(event) => setDemoUrl(event.target.value)} placeholder="https://youtu.be/… or https://drive.google.com/…" /><small>{submission ? `Target deadline: ${new Date(submission.demoDueAt).toLocaleString()}` : "Submit the project artifact first to create the 24-hour deadline."}</small></label>
+        <label className="sharing-confirmation"><input type="checkbox" checked={shareConfirmed} onChange={(event) => setShareConfirmed(event.target.checked)} /><span>I confirmed that Organizers can watch this video without requesting access.</span></label>
+        <button className="primary" disabled={!submission || !demoUrl.trim() || !shareConfirmed || busy === "demo"} onClick={() => void submitDemo()}>{busy === "demo" ? "Saving…" : submission?.demoVideoUrl ? "Update demo link" : "Save demo link →"}</button>
+      </section>
+      <aside className="demo-checklist"><span>YOUR DEMO SHOULD PROVE</span>{["The real problem", "A working end-to-end task", "The key human checkpoint", "A repeatable success test", "What changed after iteration", "What context the agent used", "Data and privacy choices"].map((item, i) => <label key={item}><input type="checkbox" /> <b>{String(i + 1).padStart(2, "0")}</b><span>{item}</span></label>)}<small className="checklist-note">This checklist stays on your device and does not affect judging.</small></aside>
+    </div>}
+  </div>;
 }
 
 type NoteAttribution = { text: string; editorName: string; color: string };
@@ -1574,7 +1652,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
   const [announcementHistory, setAnnouncementHistory] = useState<AnnouncementHistoryItem[]>([]);
   const [showAnnouncementHistory, setShowAnnouncementHistory] = useState(true);
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", announcementText: config?.announcementText || "", announcementActive: config?.announcementActive === true || config?.announcementActive === 1, registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0 });
+  const [form, setForm] = useState({ eventName: config?.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(config?.startsAt), endsAt: toLocalInput(config?.endsAt), timezone: config?.timezone || "America/New_York", discordUrl: config?.discordUrl || "", announcementText: config?.announcementText || "", announcementActive: config?.announcementActive === true || config?.announcementActive === 1, registrationOpen: config?.registrationOpen !== false && config?.registrationOpen !== 0, maxActiveTeams: config?.maxActiveTeams || 35 });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1584,14 +1662,14 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
     const result = await response.json() as { config?: EventConfig; participants?: RegisteredParticipant[]; teams?: ManagedTeam[]; organizerGrants?: OrganizerGrant[]; serverOrganizerEmails?: string[]; currentOrganizerParticipantId?: string; announcementHistory?: AnnouncementHistoryItem[]; error?: string };
     if (!response.ok) { setError(response.status === 401 ? "Your account does not have Organizer access." : result.error || "Event management could not be loaded."); return; }
     setParticipants(result.participants || []); setTeams(result.teams || []); setOrganizerGrants(result.organizerGrants || []); setServerOrganizerEmails(result.serverOrganizerEmails || []); setCurrentOrganizerParticipantId(result.currentOrganizerParticipantId || ""); setAnnouncementHistory(result.announcementHistory || []);
-    if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0 }); }
+    if (result.config) { onSaved(result.config); setForm({ eventName: result.config.eventName || "Personal Agent Hackathon", startsAt: toLocalInput(result.config.startsAt), endsAt: toLocalInput(result.config.endsAt), timezone: result.config.timezone || "America/New_York", discordUrl: result.config.discordUrl || "", announcementText: result.config.announcementText || "", announcementActive: result.config.announcementActive === true || result.config.announcementActive === 1, registrationOpen: result.config.registrationOpen !== false && result.config.registrationOpen !== 0, maxActiveTeams: result.config.maxActiveTeams || 35 }); }
   }
 
   useEffect(() => { const timer = window.setTimeout(() => void open(), 0); return () => window.clearTimeout(timer); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setSaving(true); setError("");
-    const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, announcementText: form.announcementText, announcementActive: form.announcementActive, announcementUpdatedAt: Date.now(), registrationOpen: form.registrationOpen };
+    const next: EventConfig = { eventName: form.eventName, startsAt: form.startsAt ? new Date(form.startsAt).getTime() : null, endsAt: form.endsAt ? new Date(form.endsAt).getTime() : null, timezone: form.timezone, discordUrl: form.discordUrl, announcementText: form.announcementText, announcementActive: form.announcementActive, announcementUpdatedAt: Date.now(), registrationOpen: form.registrationOpen, maxActiveTeams: form.maxActiveTeams };
     try {
       const response = await fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
       const result = await response.json() as { error?: string };
@@ -1672,6 +1750,7 @@ function EventManagement({ config, onSaved }: { config: EventConfig | null; onSa
         <div className="event-time-fields"><label>START TIME<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} /></label><label>END TIME<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} /></label></div>
         <label>TIMEZONE<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
         <label>DISCORD INVITE URL<input type="url" placeholder="https://discord.gg/…" value={form.discordUrl} onChange={(event) => setForm({ ...form, discordUrl: event.target.value })} /></label>
+        <label>ACTIVE WORKSPACE LIMIT<input type="number" min={1} max={100} value={form.maxActiveTeams} onChange={(event) => setForm({ ...form, maxActiveTeams: Math.max(1, Math.min(100, Number(event.target.value) || 35)) })} /><small className="field-help">{teams.length} active now · target 25–30 at kickoff · hard limit {form.maxActiveTeams} leaves room for later team splits.</small></label>
         <div className="announcement-editor"><div className="announcement-editor-title"><span>WEBSITE ANNOUNCEMENT</span><button type="button" onClick={() => setShowAnnouncementHistory((visible) => !visible)}>{showAnnouncementHistory ? "Hide history" : `View history (${announcementHistory.filter((item) => item.active).length})`}</button></div><textarea rows={4} maxLength={1000} placeholder="Example: Midpoint feedback starts in Room 204 at 2:30 PM." value={form.announcementText} onChange={(event) => setForm({ ...form, announcementText: event.target.value })} /><label><input type="checkbox" checked={form.announcementActive} onChange={(event) => setForm({ ...form, announcementActive: event.target.checked })} /><span><b>Publish across the website</b><small>Participants receive updates automatically within 30 seconds.</small></span></label><small>{form.announcementText.length}/1000 characters · Website only for now; Discord posting requires a secure webhook.</small>{showAnnouncementHistory && <div className="announcement-history">{announcementHistory.filter((item) => item.active).length ? announcementHistory.filter((item) => item.active).map((item) => <article key={item.id}><header><span className="pill on-track">{item.action}</span><small>{new Date(item.createdAt).toLocaleString()} · {item.editorName}</small></header><p>{item.announcementText}</p></article>) : <p className="notes-empty">No announcements have been published yet.</p>}</div>}</div>
         <label className="registration-toggle"><input type="checkbox" checked={form.registrationOpen} onChange={(event) => setForm({ ...form, registrationOpen: event.target.checked })} /><span><b>Registration open</b><small>When closed, new accounts cannot enter the event. Existing Participants and Organizers can still sign in.</small></span></label>
         {error && <p className="form-error">{error}</p>}<button className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : form.announcementActive ? "Save & publish" : "Save event settings"}</button>

@@ -152,6 +152,31 @@ export const teams = sqliteTable("teams", {
   updatedAt: integer("updated_at", { mode: "timestamp" }),
 });
 
+export const teamSubmissions = sqliteTable("team_submissions", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => hackathonEvents.id),
+  teamId: text("team_id").notNull().references(() => teams.id),
+  submittedByParticipantId: text("submitted_by_participant_id").notNull().references(() => eventParticipants.id),
+  updatedByParticipantId: text("updated_by_participant_id").notNull().references(() => eventParticipants.id),
+  artifactKind: text("artifact_kind", { enum: ["file", "link"] }).notNull(),
+  artifactUrl: text("artifact_url"),
+  artifactObjectKey: text("artifact_object_key"),
+  artifactFilename: text("artifact_filename"),
+  artifactMimeType: text("artifact_mime_type"),
+  artifactSizeBytes: integer("artifact_size_bytes"),
+  notes: text("notes"),
+  artifactSubmittedAt: integer("artifact_submitted_at", { mode: "timestamp" }).notNull(),
+  demoVideoUrl: text("demo_video_url"),
+  demoSubmittedAt: integer("demo_submitted_at", { mode: "timestamp" }),
+  demoDueAt: integer("demo_due_at", { mode: "timestamp" }).notNull(),
+  status: text("status", { enum: ["artifact_submitted", "complete"] }).notNull().default("artifact_submitted"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+}, (table) => [
+  uniqueIndex("team_submissions_event_team_unique").on(table.eventId, table.teamId),
+  index("team_submissions_status_idx").on(table.eventId, table.status, table.updatedAt),
+]);
+
 export const teamMemberships = sqliteTable("team_memberships", {
   id: text("id").primaryKey(),
   eventId: text("event_id").notNull().references(() => hackathonEvents.id),
@@ -559,6 +584,7 @@ export const eventConfiguration = sqliteTable("event_configuration", {
   announcementActive: integer("announcement_active", { mode: "boolean" }).notNull().default(false),
   announcementUpdatedAt: integer("announcement_updated_at", { mode: "timestamp" }),
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
+  maxActiveTeams: integer("max_active_teams").notNull().default(35),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
