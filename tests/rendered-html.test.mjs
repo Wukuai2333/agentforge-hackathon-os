@@ -524,3 +524,20 @@ test("labels Settings correctly in the shared Ask AI context", async () => {
   const portal = await source("app/portal.tsx");
   assert.match(portal, /view === "settings" \? "Settings"/);
 });
+
+test("separates organizer operations, evidence, submissions, and system health", async () => {
+  const [portal, organizer, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/organizer/route.ts"), source("app/globals.css"),
+  ]);
+  assert.match(portal, /AI Access & Usage/);
+  assert.match(portal, /Prompt Evidence/);
+  assert.match(portal, /Submissions/);
+  assert.match(portal, /Systems & Privacy/);
+  assert.match(portal, /participantDisplayName/);
+  assert.match(portal, /feedbackByPrompt/);
+  assert.match(organizer, /COALESCE\(ep\.display_name,p\.display_name,'Unknown participant'\)/);
+  assert.match(organizer, /FROM team_submissions s LEFT JOIN teams/);
+  assert.match(organizer, /downloadSubmission/);
+  assert.match(styles, /organizer-section-tabs/);
+  assert.match(styles, /evidence-row/);
+});

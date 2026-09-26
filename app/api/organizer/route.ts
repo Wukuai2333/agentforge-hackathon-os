@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; CLAWMAX_APP_URL?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
+type Runtime = { DB: D1Database; SUBMISSIONS?: R2Bucket; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; CLAWMAX_APP_URL?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
 
 function configuredProviderKeyCount(runtime: Runtime) {
   try {
@@ -34,7 +34,22 @@ export async function GET(request: Request) {
   const runtime = env as unknown as Runtime;
   if (!await authorized(request, runtime)) return Response.json({ error: "Organizer access required." }, { status: 401 });
 
-  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections, clawmaxPurges] = await Promise.all([
+  const submissionId = new URL(request.url).searchParams.get("downloadSubmission");
+  if (submissionId) {
+    const submission = await runtime.DB.prepare(`SELECT artifact_object_key AS objectKey,artifact_filename AS filename
+      FROM team_submissions WHERE id=?`).bind(submissionId).first<{ objectKey: string | null; filename: string | null }>();
+    if (!submission?.objectKey || !runtime.SUBMISSIONS) return Response.json({ error: "No stored artifact is available for this submission." }, { status: 404 });
+    const object = await runtime.SUBMISSIONS.get(submission.objectKey);
+    if (!object) return Response.json({ error: "The submitted artifact could not be found." }, { status: 404 });
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    const safeName = (submission.filename || "agentforge-submission").replace(/[^a-zA-Z0-9._-]+/g, "-");
+    headers.set("Content-Disposition", `attachment; filename="${safeName}"`);
+    headers.set("Cache-Control", "private, no-store");
+    return new Response(object.body, { headers });
+  }
+
+  const [summary, hourly, pages, teams, recent, feedbacks, settings, cogneeSync, participantModel, learningSignals, promptEvaluations, promptClusters, signalEvidence, clawmaxStatus, clawmaxRecent, clawmaxConnections, clawmaxPurges, operations, submissions] = await Promise.all([
     runtime.DB.prepare(`SELECT COUNT(*) AS totalPrompts, COALESCE(SUM(input_tokens),0) AS inputTokens,
       COALESCE(SUM(output_tokens),0) AS outputTokens,
       COALESCE(ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0),1),0) AS successRate,
@@ -48,14 +63,22 @@ export async function GET(request: Request) {
       SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,
       COALESCE(SUM(input_tokens + output_tokens),0) AS tokens
       FROM prompt_events GROUP BY page, tutorial_step ORDER BY prompts DESC LIMIT 20`).all(),
-    runtime.DB.prepare(`SELECT COALESCE(anonymous_team_id,'Unassigned') AS teamId, COUNT(*) AS prompts,
+    runtime.DB.prepare(`SELECT COALESCE(pe.anonymous_team_id,'Unassigned') AS teamId,
+      COALESCE(t.name,'Unassigned') AS teamName, COUNT(*) AS prompts,
       COALESCE(SUM(input_tokens + output_tokens),0) AS tokens
-      FROM prompt_events GROUP BY anonymous_team_id ORDER BY tokens DESC LIMIT 30`).all(),
-    runtime.DB.prepare(`SELECT id, anonymous_participant_id AS participantId, anonymous_team_id AS teamId,
-      page, tutorial_step AS tutorialStep, user_prompt AS userPrompt, response_text AS responseText,
-      model_name AS modelName, latency_ms AS latencyMs, input_tokens AS inputTokens,
-      output_tokens AS outputTokens, status, error_code AS errorCode, user_feedback AS userFeedback, created_at AS createdAt
-      FROM prompt_events ORDER BY created_at DESC LIMIT 100`).all(),
+      FROM prompt_events pe LEFT JOIN teams t ON t.id=pe.anonymous_team_id
+      GROUP BY pe.anonymous_team_id,t.name ORDER BY tokens DESC LIMIT 30`).all(),
+    runtime.DB.prepare(`SELECT pe.id, pe.anonymous_participant_id AS participantId, pe.anonymous_team_id AS teamId,
+      COALESCE(ep.display_name,p.display_name,'Unknown participant') AS participantDisplayName,
+      ep.email AS participantEmail,COALESCE(t.name,'Unassigned') AS teamName,
+      pe.page, pe.tutorial_step AS tutorialStep, pe.user_prompt AS userPrompt, pe.response_text AS responseText,
+      pe.model_name AS modelName, pe.latency_ms AS latencyMs, pe.input_tokens AS inputTokens,
+      pe.output_tokens AS outputTokens, pe.status, pe.error_code AS errorCode, pe.user_feedback AS userFeedback, pe.created_at AS createdAt
+      FROM prompt_events pe
+      LEFT JOIN event_participants ep ON ep.id=pe.anonymous_participant_id
+      LEFT JOIN participants p ON p.id=pe.anonymous_participant_id
+      LEFT JOIN teams t ON t.id=pe.anonymous_team_id
+      ORDER BY pe.created_at DESC LIMIT 100`).all(),
     runtime.DB.prepare(`SELECT afe.id, afe.prompt_event_id AS promptEventId,
       afe.anonymous_participant_id AS participantId, afe.anonymous_team_id AS teamId,
       afe.participant_display_name AS participantDisplayName, afe.feedback,
@@ -79,11 +102,16 @@ export async function GET(request: Request) {
     runtime.DB.prepare(`SELECT ev.id,ev.prompt_event_id AS promptEventId,ev.rubric_version AS rubricVersion,
       ev.evaluator,ev.evaluation_json AS evaluationJson,ev.total_score AS totalScore,ev.created_at AS createdAt,
       pe.anonymous_participant_id AS participantId,pe.page,pe.tutorial_step AS tutorialStep,pe.user_prompt AS userPrompt,
+      COALESCE(ep.display_name,p.display_name,'Unknown participant') AS participantDisplayName,
+      ep.email AS participantEmail,pe.anonymous_team_id AS teamId,COALESCE(t.name,'Unassigned') AS teamName,
       pe.context_reference AS contextReference,
       pe.parent_prompt_event_id AS parentPromptEventId,parent.user_prompt AS parentPrompt,
       pe.outcome_status AS outcomeStatus,pe.outcome_evidence AS outcomeEvidence
       FROM prompt_evaluations ev JOIN prompt_events pe ON pe.id=ev.prompt_event_id
       LEFT JOIN prompt_events parent ON parent.id=pe.parent_prompt_event_id
+      LEFT JOIN event_participants ep ON ep.id=pe.anonymous_participant_id
+      LEFT JOIN participants p ON p.id=pe.anonymous_participant_id
+      LEFT JOIN teams t ON t.id=pe.anonymous_team_id
       ORDER BY ev.created_at DESC LIMIT 100`).all(),
     runtime.DB.prepare(`SELECT id,page,tutorial_step AS tutorialStep,category,label,participant_level AS participantLevel,prompt_count AS promptCount,
       participant_count AS participantCount,error_count AS errorCount,examples_json AS examplesJson,
@@ -114,6 +142,21 @@ export async function GET(request: Request) {
       JOIN clawmax_partner_enrollments e ON e.id=r.enrollment_id
       JOIN event_participants ep ON ep.id=e.participant_id
       ORDER BY p.created_at DESC LIMIT 100`).all(),
+    runtime.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM event_participants WHERE status='active') AS registeredParticipants,
+      (SELECT COUNT(*) FROM teams WHERE status='active') AS activeTeams,
+      (SELECT COUNT(*) FROM team_submissions) AS submittedTeams,
+      (SELECT COUNT(*) FROM team_submissions WHERE status='complete') AS completeSubmissions,
+      (SELECT COUNT(*) FROM assistant_feedback_events) AS feedbackCount`).first(),
+    runtime.DB.prepare(`SELECT s.id,s.team_id AS teamId,COALESCE(t.name,'Unknown team') AS teamName,
+      s.submitted_by_participant_id AS submittedByParticipantId,COALESCE(ep.display_name,'Unknown participant') AS submittedByName,
+      s.artifact_kind AS artifactKind,s.artifact_url AS artifactUrl,s.artifact_filename AS artifactFilename,
+      s.artifact_size_bytes AS artifactSizeBytes,s.notes,s.artifact_submitted_at AS artifactSubmittedAt,
+      s.demo_video_url AS demoVideoUrl,s.demo_submitted_at AS demoSubmittedAt,s.demo_due_at AS demoDueAt,
+      s.status,s.updated_at AS updatedAt
+      FROM team_submissions s LEFT JOIN teams t ON t.id=s.team_id
+      LEFT JOIN event_participants ep ON ep.id=s.submitted_by_participant_id
+      ORDER BY s.updated_at DESC LIMIT 100`).all(),
   ]);
 
   const safeRecent = recent.results.map((row) => ({ ...row, userPrompt: maskSensitive(String(row.userPrompt || "")), responseText: maskSensitive(String(row.responseText || "")) }));
@@ -135,6 +178,8 @@ export async function GET(request: Request) {
     clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results, purges: clawmaxPurges.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,
+    operations: operations || { registeredParticipants: 0, activeTeams: 0, submittedTeams: 0, completeSubmissions: 0, feedbackCount: 0 },
+    submissions: submissions.results,
     promptClusters: promptClusters.results, signalEvidence: signalEvidence.results,
     promptEvaluations: promptEvaluations.results.map((row) => ({
       ...row, totalScore: row.totalScore ?? evaluationScore(row.evaluationJson),
