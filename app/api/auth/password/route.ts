@@ -93,7 +93,7 @@ async function signup(request: Request, runtime: Runtime, input: Input) {
     return Response.json({ verificationRequired: true, email, error: "Your account was created, but the verification email could not be sent. Use Resend verification or contact an Organizer." }, { status: 503 });
   }
   await authAudit(runtime.DB, request, "signup", "success", { email, userId });
-  return Response.json({ authenticated: false, verificationRequired: true, email, message: "Check your email to verify your AgentForge account." }, { status: 201 });
+  return Response.json({ authenticated: false, verificationRequired: true, email, message: "Verification email sent. Check Inbox, Spam, and All Mail." }, { status: 201 });
 }
 
 async function signin(request: Request, runtime: Runtime, input: Input) {

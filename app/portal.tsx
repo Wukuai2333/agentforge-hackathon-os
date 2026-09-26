@@ -244,7 +244,14 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
       if (result.verificationRequired) {
         if (result.email) setEmail(result.email);
         setMode("verify");
-        setMessage(result.message || result.error || "Check your email to verify your account.");
+        if (!response.ok) {
+          setError(result.error || "The verification email could not be sent. Try again below.");
+          return;
+        }
+        // A successful delivery request is more current than the config snapshot
+        // captured when this page first opened.
+        setConfig((current) => current ? { ...current, emailDeliveryConfigured: true } : current);
+        setMessage(result.message || "Verification email sent. Check Inbox, Spam, and All Mail.");
         return;
       }
       if (!response.ok) throw new Error(result.error || "Authentication failed.");
@@ -273,7 +280,7 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
         return;
       }
       if (result.reset) { setMode("signin"); setPassword(""); setConfirmPassword(""); }
-      setMessage(result.message || (action === "request_verification" ? "Verification email sent." : "If this email is registered, a reset link has been sent."));
+      setMessage(result.message || (action === "request_verification" ? "Verification email sent. Check Inbox, Spam, and All Mail." : "If this email is registered, a reset link has been sent."));
     } catch (problem) { setError(problem instanceof Error ? problem.message : "The email action could not be completed."); }
     finally { setBusy(false); }
   }
@@ -300,8 +307,8 @@ function AgentForgeAuthPanel({ eventName }: { eventName: string }) {
         {message && <p className="auth-success">{message}</p>}
         {mode === "signup" && <button className="primary auth-submit" disabled={busy || !config.registrationOpen} onClick={() => void submit("signup")}>{busy ? "Creating account…" : "Create account →"}</button>}
         {mode === "signin" && <><button className="primary auth-submit" disabled={busy} onClick={() => void submit("signin")}>{busy ? "Signing in…" : "Sign in →"}</button><button className="auth-forgot" onClick={() => setMode("forgot")}>Forgot password?</button></>}
-        {mode === "forgot" && <><p>Enter your email. For privacy, the confirmation looks the same whether or not an account exists.</p><button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
-        {mode === "verify" && <><p>{actionToken ? "This one-time link will verify your email and sign you in." : "Check your inbox, or request a fresh one-time verification link."}</p>{actionToken ? <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("verify")}>{busy ? "Verifying…" : "Verify email →"}</button> : <button className="primary auth-submit" disabled={busy || !config.emailDeliveryConfigured} onClick={() => void emailAction("request_verification")}>{busy ? "Sending…" : "Resend verification email"}</button>}<button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
+        {mode === "forgot" && <><p>Enter your email. For privacy, the confirmation looks the same whether or not an account exists.</p><button className="primary auth-submit" disabled={busy} aria-busy={busy} onClick={() => void emailAction("forgot")}>{busy ? "Sending…" : "Send reset link →"}</button><button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
+        {mode === "verify" && <><p>{actionToken ? "This one-time link will verify your email and sign you in." : "Check Inbox, Spam, and All Mail, or request a fresh one-time link."}</p>{actionToken ? <button className="primary auth-submit" disabled={busy} aria-busy={busy} onClick={() => void emailAction("verify")}>{busy ? "Verifying…" : "Verify email →"}</button> : <button className="primary auth-submit" disabled={busy} aria-busy={busy} onClick={() => void emailAction("request_verification")}>{busy ? "Sending verification email…" : "Resend verification email"}</button>}<button className="auth-forgot" onClick={() => setMode("signin")}>Back to sign in</button></>}
         {mode === "reset" && <button className="primary auth-submit" disabled={busy} onClick={() => void emailAction("reset")}>{busy ? "Updating…" : "Update password →"}</button>}
         <p className="auth-disclaimer">New accounts are Participants by default. Organizer access is assigned only on the server.</p>
       </>}

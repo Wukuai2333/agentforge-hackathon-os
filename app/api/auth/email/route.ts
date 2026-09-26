@@ -37,9 +37,14 @@ export async function POST(request: Request) {
     const recent = await runtime.DB.prepare("SELECT created_at AS createdAt FROM auth_action_tokens WHERE user_id=? AND purpose='verify_email' ORDER BY created_at DESC LIMIT 1")
       .bind(user.id).first<{ createdAt: number }>();
     if (recent && recent.createdAt > Date.now() - 60_000) return Response.json({ error: "Please wait one minute before requesting another email." }, { status: 429 });
-    await issueAuthEmail(runtime, user, "verify_email");
+    try { await issueAuthEmail(runtime, user, "verify_email"); }
+    catch (problem) {
+      console.error("Verification email resend failed", problem);
+      await authAudit(runtime.DB, request, "verify_email", "delivery_failed", { userId: user.id, email });
+      return Response.json({ error: "The verification email could not be delivered. Please try again or contact an Organizer." }, { status: 502 });
+    }
     await authAudit(runtime.DB, request, "verify_email", "sent", { userId: user.id, email });
-    return Response.json({ sent: true });
+    return Response.json({ sent: true, message: "Verification email sent. Check Inbox, Spam, and All Mail." });
   }
 
   if (input.action === "forgot") {
