@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
 
-type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
+type Runtime = { DB: D1Database; COGNEE_API_KEY?: string; OPENAI_API_KEY?: string; OPENAI_API_KEYS_JSON?: string; RESEND_API_KEY?: string; AUTH_EMAIL_FROM?: string; APP_ORIGIN?: string; CLAWMAX_APP_URL?: string; COGNEE_SYNC_QUEUE?: { send(message: { kind: "sync" }): Promise<void> } };
 
 function configuredProviderKeyCount(runtime: Runtime) {
   try {
@@ -126,10 +126,12 @@ export async function GET(request: Request) {
     SUM(CASE WHEN status IN ('reserved','processing') AND expires_at>=? THEN 1 ELSE 0 END) AS active,
     SUM(CASE WHEN status IN ('reserved','processing') AND expires_at<? THEN 1 ELSE 0 END) AS stale
     FROM assistant_token_reservations`).bind(Date.now(), Date.now()).first<{ active: number | null; stale: number | null }>() : { active: 0, stale: 0 };
+  const eventSchedule = await runtime.DB.prepare("SELECT starts_at AS startsAt,ends_at AS endsAt FROM event_configuration WHERE id='primary'").first<{ startsAt: number | null; endsAt: number | null }>();
+  const cogneeErrorCount = Number((cogneeSync.results as Array<{ status?: string; count?: number }>).find((row) => row.status === "error")?.count || 0);
   return Response.json({ summary, hourly: hourly.results.reverse(), pages: pages.results, teams: teams.results,
     prompts: safeRecent, settings: { ...(settings || { assistantEnabled: 1, eventTokenQuota: 5000000, defaultTeamTokenQuota: 100000, defaultParticipantTokenQuota: 25000, perMinuteRequestLimit: 10, perHourRequestLimit: 100, maxConcurrentRequests: 2, maxOutputTokens: 1500 }), providerKeyCount: configuredProviderKeyCount(runtime), keyRouting: "stable_team_shard" },
     feedbacks: safeFeedbacks,
-    preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), queueConfigured: Boolean(runtime.COGNEE_SYNC_QUEUE), activeReservations: Number(reservationHealth?.active || 0), staleReservations: Number(reservationHealth?.stale || 0), expectedParticipantScale: "50–70" },
+    preflight: { databaseReady: missingTables.length === 0, missingTables, emailConfigured: Boolean(runtime.RESEND_API_KEY && runtime.AUTH_EMAIL_FROM), appOriginConfigured: Boolean(runtime.APP_ORIGIN), scheduleConfigured: Boolean(eventSchedule?.startsAt && eventSchedule?.endsAt), clawmaxConfigured: Boolean(runtime.CLAWMAX_APP_URL), queueConfigured: Boolean(runtime.COGNEE_SYNC_QUEUE), cogneeErrorCount, activeReservations: Number(reservationHealth?.active || 0), staleReservations: Number(reservationHealth?.stale || 0), expectedParticipantScale: "50–70" },
     clawmax: { status: clawmaxStatus.results, recent: clawmaxRecent.results, connections: clawmaxConnections.results, purges: clawmaxPurges.results },
     cognee: { connected: Boolean(runtime.COGNEE_API_KEY), sync: cogneeSync.results },
     participantModel: participantModel.results, learningSignals: learningSignals.results,

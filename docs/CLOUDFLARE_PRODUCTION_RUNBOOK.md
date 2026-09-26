@@ -28,8 +28,12 @@ Build with the production configuration, then deploy the generated Worker:
 ```powershell
 $env:CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH = ".\wrangler.production.jsonc"
 npm run build
-npx wrangler deploy
+npx wrangler deploy --config dist/server/wrangler.json
 ```
+
+The generated `dist/server/wrangler.json` points Wrangler at vinext's compiled
+Worker entry and production bindings. Deploying from the source config directly
+will skip the generated virtual RSC entry and fail to bundle the application.
 
 ## 4. Verify before DNS
 

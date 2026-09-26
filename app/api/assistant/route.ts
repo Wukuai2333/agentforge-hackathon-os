@@ -192,13 +192,18 @@ export async function POST(request: Request) {
     : requestedSupport === "reduced"
       ? `This is a reduced-support scaffold request (${requestedAction}). Give a short hint, question, or trade-off only. Do not provide a worked example or final wording.`
       : `This is a faded ${requestedSupport} scaffold request (${requestedAction}). Critique the participant's existing draft only. Identify at most three gaps or assumptions and do not rewrite the answer. If no draft exists, ask the participant to draft one first.`;
-  const estimatedRequestTokens = Math.ceil((prompt.length + selectedContext.length + sharedParticipantContext.length) / 4) + 300;
-  const maxOutputTokens = Math.max(128, Math.min(4000, Number(assistantSetting?.maxOutputTokens || 1500)));
-  const reservedTokens = estimatedRequestTokens + maxOutputTokens;
-  const providerKey = providerKeys[stableKeyIndex(teamId || participantId, providerKeys.length)];
   const responseLength = preference?.responseLength || "brief";
   const interactionMode = preference?.interactionMode || "guide";
-  const lengthInstruction = responseLength === "detailed" ? "Give a structured explanation with enough detail to act, then end with one next-step question." : responseLength === "balanced" ? "Give a compact explanation, one concrete next step, and one optional follow-up question." : "Start with a short orientation of roughly 3-5 sentences. Give one concrete next step and one inviting follow-up question; do not front-load a full tutorial.";
+  const configuredMaxOutputTokens = Math.max(128, Math.min(4000, Number(assistantSetting?.maxOutputTokens || 1500)));
+  const maxOutputTokens = responseLength === "brief" ? Math.min(configuredMaxOutputTokens, 900) : responseLength === "balanced" ? Math.min(configuredMaxOutputTokens, 1400) : configuredMaxOutputTokens;
+  const estimatedRequestTokens = Math.ceil((prompt.length + selectedContext.length + sharedParticipantContext.length) / 4) + 300;
+  const reservedTokens = estimatedRequestTokens + maxOutputTokens;
+  const providerKey = providerKeys[stableKeyIndex(teamId || participantId, providerKeys.length)];
+  const lengthInstruction = responseLength === "detailed"
+    ? "Give a structured explanation with enough detail to act, but avoid repeating context. End with one next-step question."
+    : responseLength === "balanced"
+      ? "Keep the visible answer under 320 words. Give a compact explanation, one concrete next step, and at most one optional follow-up question."
+      : "Keep the visible answer under 160 words. Use at most three short paragraphs or three bullets. Give one concrete next step and one inviting follow-up question. Do not provide a full tutorial, long preamble, or exhaustive list unless the participant explicitly asks for detail.";
   const modeInstruction = interactionMode === "direct" ? "Answer directly first, while preserving the participant's decision-making." : interactionMode === "collaborate" ? "Offer a small set of options and invite the participant to choose or adapt one." : "Coach with hints and a useful question before doing substantial work for the participant.";
   await runtime.DB.prepare("DELETE FROM assistant_active_leases WHERE participant_id=? AND expires_at<?")
     .bind(participantId, now).run();

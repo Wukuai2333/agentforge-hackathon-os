@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { currentAccount, identityFromRequest } from "../../../lib/account";
+import { authAudit } from "../../../lib/local-auth";
 import { isTeamCapacityError, teamCapacityResponse } from "../../../lib/team-capacity";
 
 type Runtime = { DB: D1Database; ORGANIZER_EMAILS?: string };
@@ -29,6 +30,7 @@ export async function GET(request: Request) {
     return Response.json({ config, publishedAnnouncements: publishedAnnouncements.results });
   }
   const participants = await runtime.DB.prepare(`SELECT ep.id, ep.display_name AS displayName, ep.email, ep.role,
+    u.email_verified_at AS emailVerifiedAt,
     ep.consent_version AS consentVersion, ep.joined_at AS joinedAt, t.id AS teamId, t.name AS teamName,
     COALESCE((SELECT cr.status FROM consent_records cr WHERE cr.event_participant_id=ep.id ORDER BY cr.recorded_at DESC LIMIT 1),
       CASE WHEN ep.consent_version='pending' THEN 'pending' ELSE 'accepted' END) AS consentStatus,
@@ -37,6 +39,7 @@ export async function GET(request: Request) {
       COALESCE((SELECT MAX(pg.occurred_at) FROM event_progress_events pg WHERE pg.event_participant_id=ep.id),0),
       COALESCE((SELECT MAX(fe.created_at) FROM assistant_feedback_events fe WHERE fe.anonymous_participant_id=ep.id),0)) AS lastActive
     FROM event_participants ep
+    LEFT JOIN app_users u ON u.id=ep.user_id
     LEFT JOIN team_memberships tm ON tm.participant_id=ep.id AND tm.ended_at IS NULL
     LEFT JOIN teams t ON t.id=tm.team_id
     ORDER BY ep.joined_at DESC LIMIT 500`).all();
@@ -130,7 +133,26 @@ export async function PATCH(request: Request) {
   const runtime = env as unknown as Runtime;
   const organizer = await organizerAccount(request, runtime);
   if (!organizer) return Response.json({ error: "Organizer access required." }, { status: 401 });
-  const input = await request.json() as { action?: "update_role" | "move_team"; participantId?: string; role?: "participant" | "organizer"; targetTeamId?: string; createPersonal?: boolean; reason?: string };
+  const input = await request.json() as { action?: "update_role" | "move_team" | "verify_email"; participantId?: string; role?: "participant" | "organizer"; targetTeamId?: string; createPersonal?: boolean; reason?: string };
+  if (input.action === "verify_email") {
+    if (!input.participantId) return Response.json({ error: "Participant is required." }, { status: 400 });
+    const target = await runtime.DB.prepare(`SELECT ep.id,ep.user_id AS userId,ep.email,u.email_verified_at AS emailVerifiedAt
+      FROM event_participants ep LEFT JOIN app_users u ON u.id=ep.user_id WHERE ep.id=? LIMIT 1`)
+      .bind(input.participantId).first<{ id: string; userId: string | null; email: string | null; emailVerifiedAt: number | null }>();
+    if (!target?.userId || !target.email) return Response.json({ error: "Registered email account not found." }, { status: 404 });
+    if (target.emailVerifiedAt) return Response.json({ saved: true, unchanged: true, participantId: target.id, emailVerifiedAt: target.emailVerifiedAt });
+    const now = Date.now();
+    await runtime.DB.batch([
+      runtime.DB.prepare("UPDATE app_users SET email_verified_at=?,updated_at=? WHERE id=?").bind(now, now, target.userId),
+      runtime.DB.prepare("UPDATE auth_action_tokens SET consumed_at=? WHERE user_id=? AND purpose='verify_email' AND consumed_at IS NULL").bind(now, target.userId),
+    ]);
+    await authAudit(runtime.DB, request, "verify_email", "organizer_override", {
+      userId: target.userId,
+      email: target.email,
+      metadata: { participantId: target.id, organizerParticipantId: organizer.participantId, reason: input.reason?.trim().slice(0, 300) || "Dry-run email delivery fallback" },
+    });
+    return Response.json({ saved: true, participantId: target.id, emailVerifiedAt: now, changedBy: organizer.participantId });
+  }
   if (input.action === "move_team") {
     if (!input.participantId || (!input.targetTeamId && !input.createPersonal)) return Response.json({ error: "Participant and destination workspace are required." }, { status: 400 });
     const target = await runtime.DB.prepare(`SELECT ep.id,ep.event_id AS eventId,ep.display_name AS displayName,

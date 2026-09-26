@@ -496,3 +496,31 @@ test("stores one team artifact and a later shareable demo link", async () => {
   assert.match(schema, /teamSubmissions/);
   assert.match(schema, /maxActiveTeams/);
 });
+
+test("prioritizes a usable dry run with audited organizer fallbacks", async () => {
+  const [portal, eventApi, organizerApi, assistantApi, selectionStyles, styles] = await Promise.all([
+    source("app/portal.tsx"), source("app/api/event/route.ts"), source("app/api/organizer/route.ts"),
+    source("app/api/assistant/route.ts"), source("app/selection-clawmax.css"), source("app/globals.css"),
+  ]);
+  const navBlock = portal.match(/const nav:[\s\S]*?\n\];/)?.[0] || "";
+  assert.doesNotMatch(navBlock, /id: "coach"/);
+  assert.match(portal, /Verify manually/);
+  assert.match(portal, /Every override is audited/);
+  assert.match(eventApi, /action === "verify_email"/);
+  assert.match(eventApi, /organizer_override/);
+  assert.match(eventApi, /UPDATE auth_action_tokens SET consumed_at/);
+  assert.match(assistantApi, /under 160 words/);
+  assert.match(assistantApi, /Math\.min\(configuredMaxOutputTokens, 900\)/);
+  assert.match(organizerApi, /scheduleConfigured/);
+  assert.match(organizerApi, /clawmaxConfigured/);
+  assert.match(portal, /Email provider configured/);
+  assert.match(portal, /ClawMax Cloud waiting for Max/);
+  assert.match(selectionStyles, /min-height:46px/);
+  assert.match(styles, /waiting-for-baseline/);
+  assert.match(styles, /Team changes are Organizer-managed/);
+});
+
+test("labels Settings correctly in the shared Ask AI context", async () => {
+  const portal = await source("app/portal.tsx");
+  assert.match(portal, /view === "settings" \? "Settings"/);
+});
